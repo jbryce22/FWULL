@@ -1,0 +1,63 @@
+import { fetch } from "wix-fetch";
+import { getSecret } from "wix-secrets-backend";
+
+const BASE = "appVWHysw4oYfn9Ox";
+const TABLE = "ULL Financial Aid Applications";
+
+const F = {
+    email: "fldiWAzlBPYhKzLWM",
+    description: "fld5UTGR7YpeJmgYr",
+    adultsHousehold: "fldle53qgxHJWgUxq",
+    adultsEmployed: "fldYMDjI8OqYRRtd9",
+    kidsTotal: "fld4NBPKSy9AS71oV",
+    kidsBaseball: "fldY89OIZOau2o4oA",
+    kidsSoftball: "fld3VPWkYZPjt2yDu",
+    address: "fldf3T2cKavONqKGk",
+    firstname: "fld52YRwjMKvsflnv",
+    lastname: "fldczEZhSJnAOU8tp",
+    playerNames: "fldHrcQrybd8TyQET",
+    income: "fld8NgjTOz6JkXQgY",
+    comfortPercent: "fldndmRz4dPYLFsRu",
+    phone: "fld8i5tPL2leYtAEd"
+
+};
+
+export async function submitFinancialAid(formData) {
+    const token = await getSecret("AIRTABLE_TOKEN");
+    const url = `https://api.airtable.com/v0/${BASE}/${TABLE}`;
+
+    const fields = {
+        [F.firstname]: formData.full_name,
+        [F.lastname]: formData.last_name_d9d6,
+        [F.email]: formData.your_email,
+        [F.phone]: formData.your_phone_number,
+        [F.address]: formData.your_address,
+        [F.kidsTotal]: Number(formData.how_many_children_in_your_household || 0),
+        [F.kidsBaseball]: Number(formData.how_many_children_in_your_household_are_you_registering_to_pla_1 || 0),
+        [F.kidsSoftball]: Number(formData.how_many_children_in_your_household_are_you_interested_in_regi_1 || 0),
+        [F.playerNames]: formData.names_of_the_player_s_you_are_registering,
+        [F.description]: formData.please_briefly_describe_your_situation_and_why_you_are_requestin,
+        [F.comfortPercent]: formData.what_of_the_registration_fee_do_you_feel_comfortable_paying_1,
+        [F.adultsHousehold]: Number(formData.how_many_adults_in_your_household_including_yourself || 0),
+        [F.adultsEmployed]: Number(formData.how_many_adults_in_your_household_are_currently_employed || 0),   
+        [F.income]: formData.annual_household_income,   
+    };
+
+    const response = await fetch(url, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ fields })
+    });
+
+    const json = await response.json();
+
+    if (!response.ok) {
+        console.error("Airtable Error:", json);
+        return { success: false, error: json };
+    }
+
+    return { success: true, id: json.id };
+}
