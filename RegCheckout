@@ -1,0 +1,370 @@
+// FILE: Registration Checkout Page (pvvy3.js)
+
+import wixLocation from 'wix-location';
+import { cart } from 'wix-stores-frontend';
+import { session } from 'wix-storage';
+import { fetch } from 'wix-fetch';
+
+// ✅ NEW: backend clear-cart helper
+import { clearCurrentCart } from 'backend/cartManager';
+
+const REG_URL  = "/registrationplayer";
+const HOME_URL = "/";
+const CART_URL = "/cart-page";
+
+/* ==========================================
+    SESSION QUEUE HELPERS
+========================================== */
+function getRegQueue() {
+    return JSON.parse(session.getItem("regQueue") || "[]");
+}
+
+function setRegQueue(queue) {
+    session.setItem("regQueue", JSON.stringify(queue));
+}
+
+/* ==========================================
+    FIND DIVISION (SAFE)
+========================================== */
+function getCheckoutDivision() {
+    const q = wixLocation.query;
+    if (q.division) return q.division;
+
+    const queue = getRegQueue();
+    if (queue.length > 0) return queue[queue.length - 1].division;
+
+    return null;
+}
+
+/* ==========================================
+    PAGE READY
+========================================== */
+$w.onReady(async () => {
+    loadPageSummary();
+
+    const queue = getRegQueue();
+    loadPendingRegistrations(queue);
+
+    setupButtons();
+
+    setTimeout(validateCart, 400);
+});
+
+/* ==========================================
+    SUMMARY AT TOP OF PAGE
+========================================== */
+function loadPageSummary() {
+    const q = wixLocation.query;
+
+    $w("#textPlayerName").text = q.player || "";
+    $w("#textSport").text      = q.sport || "";
+    $w("#textDivision").text   = q.division || "";
+
+    let amount = Number(q.amount || 0);
+    $w("#textFeeAmount").text = amount ? `$${amount.toFixed(2)}` : "";
+}
+
+/* ==========================================
+    PENDING REGISTRATIONS DISPLAY
+========================================== */
+function loadPendingRegistrations(queue) {
+    if (!queue || queue.length === 0) {
+        $w("#textPendingCount").text = "No pending registrations.";
+        $w("#repeaterCartPlayers").hide();
+        $w("#textCartSubtotal").hide();
+        return;
+    }
+
+    $w("#textPendingCount").text =
+        `You have ${queue.length} pending registration${queue.length > 1 ? "s" : ""}.`;
+
+    const subtotal = queue.reduce((sum, r) => sum + Number(r.fee || 0), 0);
+    $w("#textCartSubtotal").text = `Subtotal: $${subtotal.toFixed(2)}`;
+    $w("#textCartSubtotal").show();
+
+    const data = queue.map((item, index) => ({
+        _id: `${index}`,
+        ...item
+    }));
+
+    $w("#repeaterCartPlayers").data = data;
+    $w("#repeaterCartPlayers").show();
+
+    $w("#repeaterCartPlayers").onItemReady(($item, itemData, index) => {
+        $item("#textPlayerInCart").text =
+            `${itemData.playerName} — ${itemData.division}`;
+        $item("#textPlayerFee").text =
+            `$${Number(itemData.fee).toFixed(2)}`;
+
+        // Remove one pending registration
+        $item("#buttonRemovePlayer").onClick(() => removePlayerFromQueue(index));
+    });
+}
+
+/* ==========================================
+    REMOVE ONE PLAYER REGISTRATION
+========================================== */
+function removePlayerFromQueue(index) {
+    let queue = getRegQueue();
+
+    if (index >= 0 && index < queue.length) {
+        console.log("Removing pending registration:", queue[index]);
+        queue.splice(index, 1);
+        setRegQueue(queue);
+    }
+
+    // If queue is now empty, wipe UI from checkout page
+    if (queue.length === 0) {
+        try { $w("#repeaterCartPlayers").data = []; } catch (e) {}
+        try { $w("#textPendingCount").text = "No pending registrations."; } catch (e) {}
+        try { $w("#textCartSubtotal").text = "$0.00"; } catch (e) {}
+    }
+
+    // ALWAYS take user back to registration page to add a new player
+    wixLocation.to(REG_URL);
+}
+
+
+/* ==========================================
+    DUPLICATE CHECK (Checkout logic)
+========================================== */
+function isDuplicateInQueue(division) {
+    const queue = getRegQueue();
+    const q = wixLocation.query;
+    const playerName = q.player || "";
+
+    const count = queue.filter(r =>
+        r.playerName === playerName &&
+        r.division === division
+    ).length;
+
+    // On checkout:
+    // 0 or 1 occurrences = normal
+    // >1 = real duplicate
+    return count > 1;
+}
+
+/* ==========================================
+    SETUP BUTTONS
+========================================== */
+function setupButtons() {
+
+    // PAY → Add to cart then go to cart page
+    $w("#buttonPay").onClick(async () => {
+        const division = getCheckoutDivision();
+
+        if (division && isDuplicateInQueue(division)) {
+            showDuplicateWarning();
+            return;
+        }
+
+        await addItemToCart(division, "cart");
+    });
+
+    // ANOTHER REG → Add to cart then go to registration page
+    $w("#buttonAnotherReg").onClick(async () => {
+        const division = getCheckoutDivision();
+
+        if (division && isDuplicateInQueue(division)) {
+            showDuplicateWarning();
+            return;
+        }
+
+        await addItemToCart(division, "another");
+    });
+
+    // CLEAR ALL → Reset everything and go home
+$w('#buttonClearRegistrations').onClick(async () => {
+    console.log('[Checkout] buttonClearRegistrations clicked');
+
+    // Optional: disable buttons to prevent double-clicks
+    $w('#buttonClearRegistrations').disable();
+    if ($w('#buttonPay')) $w('#buttonPay').disable();
+    if ($w('#buttonAnotherReg')) $w('#buttonAnotherReg').disable();
+
+    try {
+        // 1) Try to clear the Wix eCommerce cart (backend)
+        try {
+            const result = await clearCurrentCart();
+            console.log('[Checkout] clearCurrentCart result:', result);
+        } catch (err) {
+            console.error('[Checkout] clearCurrentCart threw:', err);
+            // We don't fail the whole flow if cart clearing fails
+        }
+
+        // 2) Clear the pending registrations queue from session storage
+        session.setItem('regQueue', '[]');
+
+        // 3) Clear UI elements on this page
+        try {
+            if ($w('#repeaterCartPlayers')) {
+                $w('#repeaterCartPlayers').data = [];
+            }
+        } catch (e) {
+            console.warn('Could not clear repeaterPlayers data:', e);
+        }
+
+        try {
+            if ($w('#textPendingCount')) {
+                $w('#textPendingCount').text = 'No players pending registration.';
+            }
+        } catch (e) {}
+
+        try {
+            if ($w('#textPlayerName')) $w('#textPlayerName').text = '';
+            if ($w('#textSport'))      $w('#textSport').text = '';
+            if ($w('#textDivision'))   $w('#textDivision').text = '';
+            if ($w('#textFeeAmount'))  $w('#textFeeAmount').text = '$0.00';
+            if ($w('#textCartSubtotal')) $w('#textCartSubtotal').text = '$0.00';
+        } catch (e) {
+            console.warn('Could not clear header fields:', e);
+        }
+
+        // 4) Navigate home
+        wixLocation.to('/');   // or 'https://www.fwull.com/' if you prefer absolute
+
+    } finally {
+        // Re-enable buttons (mostly for safety; page will navigate anyway)
+        $w('#buttonClearRegistrations').enable();
+        if ($w('#buttonPay')) $w('#buttonPay').enable();
+        if ($w('#buttonAnotherReg')) $w('#buttonAnotherReg').enable();
+    }
+});
+
+}
+
+/* ==========================================
+    DUPLICATE WARNING
+========================================== */
+function showDuplicateWarning() {
+    $w("#textDuplicateWarning").text =
+        "This player is already in your pending registrations.";
+    $w("#textDuplicateWarning").show();
+}
+
+/* ==========================================
+    CLEAR ALL REGISTRATIONS + CART
+========================================== */
+async function clearAllRegistrations() {
+    setRegQueue([]);
+
+    // Correct cart clearing API
+    try {
+        //await cart.setCart({ lineItems: [] });
+        console.log("Cart cleared using setCart()");
+    } catch (err) {
+        console.error("Cart clear error:", err);
+    }
+
+    // Reset UI
+    $w("#textPlayerName").text = "";
+    $w("#textSport").text = "";
+    $w("#textDivision").text = "";
+    $w("#textFeeAmount").text = "";
+    $w("#textPendingCount").text = "";
+    $w("#textCartSubtotal").text = "";
+
+    $w("#repeaterCartPlayers").data = [];
+
+    $w("#textCartMismatchWarning").hide();
+    $w("#textDuplicateWarning").hide();
+    $w("#textError").hide();
+    $w("#textStatus").hide();
+
+    wixLocation.to(HOME_URL);
+}
+
+/* ==========================================
+    CART SYNC VALIDATION
+========================================== */
+async function validateCart() {
+    const queue = getRegQueue();
+
+    if (!queue || queue.length === 0) {
+        $w("#textCartMismatchWarning").hide();
+        return;
+    }
+
+    let cartData;
+    try {
+        cartData = await cart.getCurrentCart();
+    } catch (err) {
+        console.error("cart error:", err);
+        return;
+    }
+
+    const items = cartData?.lineItems || [];
+
+    // If cart empty — no mismatch
+    if (items.length === 0) {
+        $w("#textCartMismatchWarning").hide();
+        return;
+    }
+
+    // Only compare when item counts match
+    if (items.length !== queue.length) {
+        $w("#textCartMismatchWarning").hide();
+        return;
+    }
+
+    const cartDivisions = items.map(i => i.name);
+    const queueDivisions = queue.map(r => r.division);
+
+    const allQueueInCart = queueDivisions.every(div =>
+        cartDivisions.some(n => n.includes(div))
+    );
+
+    const allCartInQueue = cartDivisions.every(n =>
+        queueDivisions.some(div => n.includes(div))
+    );
+
+    if (allQueueInCart && allCartInQueue) {
+        $w("#textCartMismatchWarning").hide();
+        return;
+    }
+
+    // Actual mismatch
+    $w("#textCartMismatchWarning").text =
+        "Your cart does not match your pending registrations. You may need to clear your registrations or cart.";
+    $w("#textCartMismatchWarning").show();
+}
+
+/* ==========================================
+    ADD ITEM TO CART
+========================================== */
+async function addItemToCart(division, redirectType) {
+    try {
+        $w("#textStatus").text = "Adding registration to cart...";
+        $w("#textStatus").show();
+
+        if (!division) throw new Error("Missing division.");
+
+        const encodedDiv = encodeURIComponent(division);
+        const response = await fetch(`/_functions/get_product?division=${encodedDiv}`);
+
+        if (!response.ok) {
+            const txt = await response.text();
+            throw new Error("Backend error: " + txt);
+        }
+
+        const { productId, variantId } = await response.json();
+        if (!productId) throw new Error("Product not found.");
+
+        let cartItem = { productId, quantity: 1 };
+        if (variantId) cartItem.options = { variantId };
+
+        await cart.addProducts([cartItem]);
+
+        if (redirectType === "cart") {
+            wixLocation.to(CART_URL);
+        } else {
+            wixLocation.to(REG_URL);
+        }
+
+    } catch (err) {
+        console.error("Checkout error:", err);
+        $w("#textError").text = err.message;
+        $w("#textError").show();
+        $w("#textStatus").hide();
+    }
+}
