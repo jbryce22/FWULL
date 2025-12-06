@@ -1,0 +1,163 @@
+// Velo API Reference: https://www.wix.com/velo/reference/api-overview/introduction
+
+//$w.onReady(function () {
+
+	// Write your Javascript code here using the Velo framework API
+
+	// Print hello world:
+	// console.log("Hello world!");
+
+	// Call functions on page elements, e.g.:
+	// $w("#button1").label = "Click me!";
+
+	// Click "Run", or Preview your site, to execute your code
+
+//});
+
+// FILE: Stores Thank You Page code
+import { session } from 'wix-storage';
+import wixData from 'wix-data';
+import { syncRegistrationToAirtable } from 'backend/airtable';
+
+$w.onReady(async () => {
+    try {
+        const thankYouEl = $w('#thankYouPage1');
+        if (!thankYouEl || !thankYouEl.getOrder) {
+            console.error("Thank You Page element #thankYouPage1 not found or missing getOrder().");
+            return;
+        }
+
+        const order = await thankYouEl.getOrder();
+        if (!order) {
+            console.warn("No order returned from Thank You Page.");
+            return;
+        }
+
+        const orderId = order._id;
+        const lineItems = order.lineItems || [];
+        console.log("Order:", orderId, lineItems);
+
+        // Pull pending registrations from session
+        const stored = session.getItem("regQueue");
+        if (!stored) {
+            console.warn("No regQueue in session.");
+            return;
+        }
+
+        let regQueue;
+        try {
+            regQueue = JSON.parse(stored);
+        } catch (e) {
+            console.error("Failed to parse regQueue:", e);
+            return;
+        }
+
+        if (!Array.isArray(regQueue) || regQueue.length === 0) {
+            console.warn("regQueue is empty.");
+            return;
+        }
+
+        // Create "slots" from line items (handles quantity > 1)
+        const slots = [];
+        lineItems.forEach(li => {
+            const qty = li.quantity || 1;
+            for (let i = 0; i < qty; i++) {
+                slots.push({ lineItem: li, used: false });
+            }
+        });
+
+        const matched = [];
+
+        // For each registration, find a matching line item by division text
+        for (const reg of regQueue) {
+            const idx = slots.findIndex(s =>
+                !s.used &&
+                typeof s.lineItem.name === "string" &&
+                s.lineItem.name.includes(reg.division)
+            );
+
+            if (idx !== -1) {
+                slots[idx].used = true;
+                matched.push({ reg, lineItem: slots[idx].lineItem });
+            }
+        }
+
+        if (matched.length === 0) {
+            console.warn("No registrations matched to order line items.");
+            return;
+        }
+
+        console.log("Matched registrations:", matched);
+
+        // Insert each matched registration into SeasonRegistration
+        const summaryLines = [];
+
+        for (const { reg, lineItem } of matched) {
+            const price =
+                (typeof lineItem.totalPrice === "number" ? lineItem.totalPrice : null) ??
+                ((lineItem.price || 0) * (lineItem.quantity || 1));
+
+            const itemToInsert = {
+                parent: reg.parentId,          // reference to PrivateMembersData
+                player: reg.playerId,          // reference to UllPlayerList
+                playerFirstName: reg.playerFirstName,
+                playerLastName: reg.playerLastName,
+                playerName: reg.playerName,
+                seasonName: reg.seasonName,
+                sport: reg.sport,
+                division: reg.division,
+                school: reg.school,
+                jerseySize: reg.jerseySize,
+                emergencyContactName: reg.emergencyContactName,
+                emergencyContactPhone: reg.emergencyContactPhone,
+                volunteerInterest: reg.volunteerInterest,
+                requestPlayDown: reg.requestPlayDown,
+                coachRequest: reg.coachRequest,
+                teamParentVolunteer: reg.teamParentVolunteer,
+                teamParentName: reg.teamParentName,
+                teamParentEmail: reg.teamParentEmail,
+                teamParentPhone: reg.teamParentPhone,
+                coachVolunteer: reg.coachVolunteer,
+                coachVolunteerType: reg.coachVolunteerType,
+                volunteerCoachName: reg.volunteerCoachName,
+                volunteerCoachEmail: reg.volunteerCoachEmail,
+                volunteerCoachNumber: reg.volunteerCoachNumber,
+
+                fee: price,
+                paid: true,
+                orderId: orderId,
+                datePaid: new Date()
+            };
+
+            const created = await wixData.insert("SeasonRegistration", itemToInsert);
+            console.log("Inserted SeasonRegistration:", created._id);
+
+            // Sync to Airtable
+            try {
+                await syncRegistrationToAirtable(created);
+            } catch (e) {
+                console.error("Airtable sync failed for", created._id, e);
+            }
+
+            summaryLines.push(`${reg.playerName} – ${reg.division}`);
+        }
+
+        // Show summary on Thank You page
+        if ($w("#textRegistrationSummary")) {
+            $w("#textRegistrationSummary").text = summaryLines.join("\n");
+            $w("#textRegistrationSummary").show();
+        }
+
+        // Optional: clear only matched entries from session
+        const remaining = regQueue.filter(r =>
+            !matched.some(m => m.reg.playerId === r.playerId &&
+                               m.reg.seasonName === r.seasonName &&
+                               m.reg.sport === r.sport)
+        );
+        session.setItem("regQueue", JSON.stringify(remaining));
+        console.log("Remaining regQueue after processing:", remaining);
+
+    } catch (err) {
+        console.error("Error on Thank You page:", err);
+    }
+});
