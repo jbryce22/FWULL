@@ -7,10 +7,11 @@ import { fetch } from 'wix-fetch';
 
 // ✅ NEW: backend clear-cart helper
 import { clearCurrentCart } from 'backend/cartManager';
+import { ROUTES, DELAYS, VALIDATION } from 'public/constants.js';
 
-const REG_URL  = "/registrationplayer";
-const HOME_URL = "/";
-const CART_URL = "/cart-page";
+const REG_URL = ROUTES.REGISTRATION;
+const HOME_URL = ROUTES.HOME;
+const CART_URL = ROUTES.CART;
 
 /* ==========================================
     INPUT SANITIZATION
@@ -25,18 +26,86 @@ function sanitizeInput(input) {
         .replace(/'/g, '&#x27;')
         .replace(/\//g, '&#x2F;')
         .trim()
-        .substring(0, 200); // Limit length to prevent abuse
+        .substring(0, VALIDATION.MAX_INPUT_LENGTH); // Limit length to prevent abuse
 }
 
 /* ==========================================
     SESSION QUEUE HELPERS
 ========================================== */
+
+// Validate a single registration item from the queue
+function validateRegistrationItem(item) {
+    // Required string fields
+    const requiredStrings = ['playerId', 'parentId', 'playerFirstName', 'playerLastName',
+                              'playerName', 'seasonName', 'sport', 'division'];
+    for (const field of requiredStrings) {
+        if (!item[field] || typeof item[field] !== 'string' || item[field].length > VALIDATION.MAX_INPUT_LENGTH) {
+            console.error(`[Queue Validation] Invalid ${field}:`, item[field]);
+            return false;
+        }
+    }
+
+    // Fee must be a non-negative number
+    if (typeof item.fee !== 'number' || item.fee < 0 || item.fee > 10000) {
+        console.error('[Queue Validation] Invalid fee:', item.fee);
+        return false;
+    }
+
+    // Validate division format
+    if (item.division.length > VALIDATION.MAX_DIVISION_LENGTH) {
+        console.error('[Queue Validation] Division too long:', item.division);
+        return false;
+    }
+
+    return true;
+}
+
 function getRegQueue() {
-    return JSON.parse(session.getItem("regQueue") || "[]");
+    try {
+        const raw = session.getItem("regQueue");
+        if (!raw) return [];
+
+        const queue = JSON.parse(raw);
+
+        // Validate it's an array
+        if (!Array.isArray(queue)) {
+            console.error('[Queue Validation] regQueue is not an array');
+            session.setItem("regQueue", "[]");
+            return [];
+        }
+
+        // Validate each item in the queue
+        const validQueue = queue.filter(item => {
+            if (!item || typeof item !== 'object') {
+                console.warn('[Queue Validation] Skipping invalid item:', item);
+                return false;
+            }
+            return validateRegistrationItem(item);
+        });
+
+        // If we filtered out invalid items, update session
+        if (validQueue.length !== queue.length) {
+            console.warn(`[Queue Validation] Filtered ${queue.length - validQueue.length} invalid items from queue`);
+            session.setItem("regQueue", JSON.stringify(validQueue));
+        }
+
+        return validQueue;
+    } catch (e) {
+        console.error('[Queue Validation] Failed to parse regQueue:', e);
+        session.setItem("regQueue", "[]");
+        return [];
+    }
 }
 
 function setRegQueue(queue) {
-    session.setItem("regQueue", JSON.stringify(queue));
+    if (!Array.isArray(queue)) {
+        console.error('[Queue Validation] Attempted to set non-array queue');
+        return;
+    }
+
+    // Validate all items before saving
+    const validQueue = queue.filter(validateRegistrationItem);
+    session.setItem("regQueue", JSON.stringify(validQueue));
 }
 
 /* ==========================================
@@ -63,7 +132,7 @@ $w.onReady(async () => {
 
     setupButtons();
 
-    setTimeout(validateCart, 400);
+    setTimeout(validateCart, DELAYS.CART_VALIDATION);
 });
 
 /* ==========================================

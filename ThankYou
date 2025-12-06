@@ -18,6 +18,7 @@
 import { session } from 'wix-storage';
 import wixData from 'wix-data';
 import { syncRegistrationToAirtable } from 'backend/airtable';
+import { AIRTABLE } from 'public/constants.js';
 
 $w.onReady(async () => {
     try {
@@ -132,7 +133,7 @@ $w.onReady(async () => {
             // Insert to database with initial sync status
             const itemWithSyncStatus = {
                 ...itemToInsert,
-                airtableSyncStatus: 'pending',
+                airtableSyncStatus: AIRTABLE.SYNC_STATUS.PENDING,
                 airtableSyncAttempts: 0
             };
             const created = await wixData.insert("SeasonRegistration", itemWithSyncStatus);
@@ -145,7 +146,7 @@ $w.onReady(async () => {
                 // Update sync status to success
                 await wixData.update("SeasonRegistration", {
                     _id: created._id,
-                    airtableSyncStatus: 'synced',
+                    airtableSyncStatus: AIRTABLE.SYNC_STATUS.SYNCED,
                     airtableSyncedAt: new Date()
                 });
                 console.log("Airtable sync successful for", created._id);
@@ -157,7 +158,7 @@ $w.onReady(async () => {
                 try {
                     await wixData.update("SeasonRegistration", {
                         _id: created._id,
-                        airtableSyncStatus: 'failed',
+                        airtableSyncStatus: AIRTABLE.SYNC_STATUS.FAILED,
                         airtableSyncError: e.message || String(e),
                         airtableSyncAttempts: 1,
                         lastSyncAttempt: new Date()

@@ -1,5 +1,6 @@
 // backend/airtable.jsw
 import { fetch } from 'wix-fetch';
+import { AIRTABLE, VALIDATION } from 'public/constants.js';
 
 // ---->  AIRTABLE AUTHENTICATION SETUP  <----
 let getToken;
@@ -21,18 +22,18 @@ try {
 
 // -----------------------------------------------------------------
 // --- CONSTANTS FOR AIRTABLE BASE & TABLES ---
-const BASE_ID      = 'appU008DNqprqcBR3';
+const BASE_ID = AIRTABLE.BASE_ID_MAIN;
 
 // Constants for the Division Lookup (getDivisionNote)
-const DIV_LOOKUP_TABLE  = 'Divisions'; // Table used by getDivisionNote
-const DIV_FIELD    = 'Division and Year';
-const NOTE_FIELD   = 'Division Specific Note';
-const FEE_FIELD    = 'Registration Fee';
-const PLAY_DOWN_FIELD = 'Play Down Eligible Division?';
-const COACH_REQUEST = 'Coach Request Eligible Division?'; // Eligibility for coach request
+const DIV_LOOKUP_TABLE = AIRTABLE.TABLE_DIVISIONS;
+const DIV_FIELD = AIRTABLE.FIELD_DIVISION_AND_YEAR;
+const NOTE_FIELD = AIRTABLE.FIELD_DIVISION_NOTE;
+const FEE_FIELD = AIRTABLE.FIELD_REGISTRATION_FEE;
+const PLAY_DOWN_FIELD = AIRTABLE.FIELD_PLAY_DOWN_ELIGIBLE;
+const COACH_REQUEST = AIRTABLE.FIELD_COACH_REQUEST_ELIGIBLE;
 
 // Constants for the Registration Sync (syncRegistrationToAirtable)
-const REG_SYNC_TABLE = "All Players by Year"; // <-- CRITICAL: VERIFY YOUR AIRTABLE TABLE NAME
+const REG_SYNC_TABLE = AIRTABLE.TABLE_ALL_PLAYERS;
 
 // -----------------------------------------------------------------
 // --- 1. DIVISION NOTE LOOKUP FUNCTION ---
@@ -46,7 +47,7 @@ export async function getDivisionNote(division) {
 
     // Validate division format (defense in depth)
     // Expected format: "Sport Division - YYYY.N" (e.g., "Baseball Majors - 2026.1")
-    if (division.length > 100) {
+    if (division.length > VALIDATION.MAX_DIVISION_LENGTH) {
         console.error('[Backend] Division string too long, possible injection attempt');
         return { success: false, error: 'Invalid division format' };
     }
@@ -102,8 +103,8 @@ export async function getDivisionNote(division) {
         const note = record?.[NOTE_FIELD] ?? 'No note';
         const fee = record?.[FEE_FIELD] ?? 0;
 
-        const playDownEligible = record?.[PLAY_DOWN_FIELD] === 'Yes';
-        const coachRequestEligible = record?.[COACH_REQUEST] === 'Yes';
+        const playDownEligible = record?.[PLAY_DOWN_FIELD] === AIRTABLE.ANSWERS.YES;
+        const coachRequestEligible = record?.[COACH_REQUEST] === AIRTABLE.ANSWERS.YES;
 
         console.log('[Backend] Play Down Eligible? →', playDownEligible);
         console.log('[Backend] Coach Request Eligible? →', coachRequestEligible);
@@ -144,7 +145,7 @@ export async function syncRegistrationToAirtable(regDoc) {
     const url = `https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent(REG_SYNC_TABLE)}`;
 
     // Prepare Single Select fields: AirTable Single Selects must match the option name exactly
-    const playDownValue = regDoc.requestPlayDown ? 'Yes' : 'No';
+    const playDownValue = regDoc.requestPlayDown ? AIRTABLE.ANSWERS.YES : AIRTABLE.ANSWERS.NO;
     // Assuming coachRequest holds a name or text. If it's a checkbox, adjust this.
     const coachRequestValue = regDoc.coachRequest ?? '';
 
