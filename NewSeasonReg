@@ -5,10 +5,11 @@ import wixLocation from 'wix-location';
 import { getDivisionNote } from 'backend/airtable';
 import { session } from 'wix-storage';
 import { clearCurrentCart } from 'backend/cartManager';
+import { COLLECTIONS, DIVISIONS, SPORTS, SEASON, FORM_OPTIONS, ROUTES, DELAYS } from 'public/constants.js';
 
 
-const REGISTRATION_COLLECTION = "SeasonRegistration";
-const PLAYER_COLLECTION = "UllPlayerList";
+const REGISTRATION_COLLECTION = COLLECTIONS.REGISTRATION;
+const PLAYER_COLLECTION = COLLECTIONS.PLAYER;
 
 let selectedPlayerId = null;
 let playerBirthDate = null;
@@ -21,19 +22,33 @@ function safeShow(id, text = "") {
         if (!el) return;
         if (text && el.text !== undefined) el.text = text;
         el.show();
-    } catch (e) {}
+    } catch (e) {
+        console.warn(`[safeShow] Failed to show element ${id}:`, e.message);
+    }
 }
 
 function safeHide(id) {
-    try { $w(id)?.hide(); } catch (e) {}
+    try {
+        $w(id)?.hide();
+    } catch (e) {
+        console.warn(`[safeHide] Failed to hide element ${id}:`, e.message);
+    }
 }
 
 function safeCollapse(id) {
-    try { $w(id)?.collapse(); } catch (e) {}
+    try {
+        $w(id)?.collapse();
+    } catch (e) {
+        console.warn(`[safeCollapse] Failed to collapse element ${id}:`, e.message);
+    }
 }
 
 function safeExpand(id) {
-    try { $w(id)?.expand(); } catch (e) {}
+    try {
+        $w(id)?.expand();
+    } catch (e) {
+        console.warn(`[safeExpand] Failed to expand element ${id}:`, e.message);
+    }
 }
 
 // ===== FORM VALIDATION =====
@@ -70,7 +85,7 @@ function handleSchoolOther() {
     const school = $w("#inputSchool").value;
     const other = $w("#inputSchoolother");
 
-    if (school === "Other/Not Listed") {
+    if (school === FORM_OPTIONS.SCHOOL_OTHER) {
         safeExpand("#inputSchoolother");
         other.required = true;
     } else {
@@ -159,6 +174,48 @@ async function loadDivisionAndFee(divisionKey) {
 }
 
 
+// ===== DUPLICATE CHECK FUNCTION =====
+async function checkForDuplicates(playerId, seasonName, sport) {
+    // Check 1: CMS SeasonRegistration collection (already paid registrations)
+    try {
+        const existing = await wixData.query(REGISTRATION_COLLECTION)
+            .eq("player", playerId)
+            .eq("seasonName", seasonName)
+            .eq("sport", sport)
+            .find();
+        if (existing.items.length > 0) {
+            return {
+                isDuplicate: true,
+                type: 'cms',
+                message: "Player already registered for this season and sport in our records."
+            };
+        }
+    } catch (e) {
+        console.error("CMS duplicate check error:", e);
+    }
+
+    // Check 2: Session regQueue (pending registrations)
+    try {
+        const regQueue = JSON.parse(session.getItem("regQueue") || "[]");
+        const duplicate = regQueue.find(r =>
+            r.playerId === playerId &&
+            r.seasonName === seasonName &&
+            r.sport === sport
+        );
+        if (duplicate) {
+            return {
+                isDuplicate: true,
+                type: 'queue',
+                message: "Player already has a pending registration for this season and sport."
+            };
+        }
+    } catch (e) {
+        console.error("RegQueue duplicate check error:", e);
+    }
+
+    return { isDuplicate: false };
+}
+
 // ===== CLEAN DIVISION CALCULATION (2026 SEASON) =====
 const calculateDivision = async () => {
     const playerOk = selectedPlayerId && playerBirthDate;
@@ -171,50 +228,54 @@ const calculateDivision = async () => {
         return;
     }
 
-    // Prevent duplicate based on already-paid registrations
-    try {
-        const existing = await wixData.query(REGISTRATION_COLLECTION)
-            .eq("player", selectedPlayerId)   // reference field
-            .eq("seasonName", seasonOk)
-            .eq("sport", sportOk)
-            .find();
-        if (existing.items.length > 0) {
-            $w("#textDivision").text = "Player already registered for this season.";
-            safeHide("#group2"); safeHide("#group3"); safeHide("#buttonRegister");
-            return;
-        }
-    } catch (e) {}
+    // Check for duplicates in both CMS and regQueue
+    const duplicateCheck = await checkForDuplicates(selectedPlayerId, seasonOk, sportOk);
+    if (duplicateCheck.isDuplicate) {
+        $w("#textDivision").text = duplicateCheck.message;
+        safeShow("#textError", duplicateCheck.message);
+        safeHide("#group2"); safeHide("#group3"); safeHide("#buttonRegister");
+        return;
+    }
+
+    // Clear any previous error messages
+    safeHide("#textError");
 
     // calculate age
     const bd = new Date(playerBirthDate);
     const season = $w("#dropdownSeason").value;
     const year = season.match(/\d{4}/)?.[0] || "2026";
     const isFall = season.toLowerCase().includes("fall");
-    const cutoffMonth = sportOk === "Baseball" ? 7 : 0;  // July/Aug (month index 7 => Aug, but you used 7/31; we keep your original)
-    const cutoffDay = sportOk === "Baseball" ? 31 : 1;
+
+    // Get cutoff dates from constants based on sport
+    const cutoffConfig = sportOk === SPORTS.BASEBALL
+        ? SEASON.CUTOFF_DATES.BASEBALL
+        : SEASON.CUTOFF_DATES.SOFTBALL;
+    const cutoffMonth = cutoffConfig.month;
+    const cutoffDay = cutoffConfig.day;
+
     const cutoffYear = isFall ? Number(year) + 1 : Number(year);
     const cutoffDate = new Date(cutoffYear, cutoffMonth, cutoffDay);
     const age = Math.floor((cutoffDate - bd) / (365.25 * 24 * 60 * 60 * 1000));
 
-    const suffix = isFall ? ".2" : ".1";
+    const suffix = isFall ? SEASON.SUFFIX_FALL : SEASON.SUFFIX_SPRING;
     const seasonTag = ` - ${year}${suffix}`;
 
     let division = "Unknown";
-    if (sportOk === "Baseball") {
-        if (age >= 14) division = "Baseball 14U Junior" + seasonTag;
-        else if (age === 13) division = "Baseball 13U Intermediate" + seasonTag;
-        else if (age >= 11 && age <= 12) division = "Baseball Majors" + seasonTag;
-        else if (age === 10) division = "Baseball Upper Minors" + seasonTag;
-        else if (age === 9) division = "Baseball Lower Minors" + seasonTag;
-        else if (age >= 7 && age <= 8) division = "Baseball Coach Pitch" + seasonTag;
-        else if (age === 6) division = "Baseball PeeWee 6" + seasonTag;
-        else if (age >= 4 && age <= 5) division = "Baseball PeeWee 4/5" + seasonTag;
+    if (sportOk === SPORTS.BASEBALL) {
+        if (age >= 14) division = DIVISIONS.BASEBALL_14U + seasonTag;
+        else if (age === 13) division = DIVISIONS.BASEBALL_13U + seasonTag;
+        else if (age >= 11 && age <= 12) division = DIVISIONS.BASEBALL_MAJORS + seasonTag;
+        else if (age === 10) division = DIVISIONS.BASEBALL_UPPER_MINORS + seasonTag;
+        else if (age === 9) division = DIVISIONS.BASEBALL_LOWER_MINORS + seasonTag;
+        else if (age >= 7 && age <= 8) division = DIVISIONS.BASEBALL_COACH_PITCH + seasonTag;
+        else if (age === 6) division = DIVISIONS.BASEBALL_PEEWEE_6 + seasonTag;
+        else if (age >= 4 && age <= 5) division = DIVISIONS.BASEBALL_PEEWEE_4_5 + seasonTag;
     }
-    else if (sportOk === "Softball") {
-        if (age >= 11 && age <= 12) division = "Softball Majors" + seasonTag;
-        else if (age >= 9 && age <= 10) division = "Softball Minors" + seasonTag;
-        else if (age >= 7 && age <= 8) division = "Softball Coach Pitch" + seasonTag;
-        else if (age >= 6 && age <= 7) division = "Softball Daisy League" + seasonTag;
+    else if (sportOk === SPORTS.SOFTBALL) {
+        if (age >= 11 && age <= 12) division = DIVISIONS.SOFTBALL_MAJORS + seasonTag;
+        else if (age >= 9 && age <= 10) division = DIVISIONS.SOFTBALL_MINORS + seasonTag;
+        else if (age >= 7 && age <= 8) division = DIVISIONS.SOFTBALL_COACH_PITCH + seasonTag;
+        else if (age >= 6 && age <= 7) division = DIVISIONS.SOFTBALL_DAISY + seasonTag;
     } else {
         division = "No division available";
     }
@@ -280,8 +341,12 @@ $w.onReady(async () => {
     if ($w('#buttonClearAllRegs')) {
         $w('#buttonClearAllRegs').onClick(async () => {
             console.log('[Reg Page] Clear All button clicked');
-            
-            // Disable to prevent double-click spam
+
+            // TODO: Add confirmation modal for better UX
+            // Recommended: Create a custom lightbox with "Are you sure?" message
+            // For now, we rely on clear button labeling to prevent accidents
+
+            // Disable immediately to prevent double-click spam
             $w('#buttonClearAllRegs').disable();
 
             try {
@@ -302,7 +367,9 @@ $w.onReady(async () => {
                 try {
                     if ($w('#textSuccess')) $w('#textSuccess').hide();
                     if ($w('#textError'))   $w('#textError').hide();
-                } catch (e) {}
+                } catch (e) {
+                    console.warn('[Reg Page] Failed to hide status messages:', e);
+                }
 
                 // 4) Optional: show a confirmation
                 try {
@@ -310,7 +377,9 @@ $w.onReady(async () => {
                         $w('#textSuccess').text = 'Cart and pending registrations cleared.';
                         $w('#textSuccess').show();
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.warn('[Reg Page] Failed to show success message:', e);
+                }
 
                 // NOTE: We *don’t* redirect here so the parent can keep working
                 // If you prefer to send them home, uncomment:
@@ -327,10 +396,16 @@ $w.onReady(async () => {
 
 // ===== REGISTER BUTTON =====
 $w("#buttonRegister").onClick(async () => {
-    if (!isFormValid()) {
-        safeShow("#textError", "Please complete all required fields.");
-        return;
-    }
+    // Disable button immediately to prevent double-click
+    const registerButton = $w("#buttonRegister");
+    registerButton.disable();
+
+    try {
+        if (!isFormValid()) {
+            safeShow("#textError", "Please complete all required fields.");
+            registerButton.enable(); // Re-enable on validation error
+            return;
+        }
 
     const player = playerDataMap[selectedPlayerId];
     const sport = $w("#dropdownSport").value;
@@ -339,7 +414,7 @@ $w("#buttonRegister").onClick(async () => {
     const divText = $w("#textDivision").text;
     const division = divText.split("→")[1]?.trim() || "Unknown";
 
-    const school = $w("#inputSchool").value === "Other/Not Listed"
+    const school = $w("#inputSchool").value === FORM_OPTIONS.SCHOOL_OTHER
         ? $w("#inputSchoolother").value
         : $w("#inputSchool").value;
 
@@ -375,27 +450,37 @@ $w("#buttonRegister").onClick(async () => {
     try {
         const noteRes = await getDivisionNote(division);
         if (noteRes.success) fee = noteRes.fee || 0;
-    } catch (e) {}
-
-    // Prevent duplicate for this session (same player+season+sport)
-    let regQueue = JSON.parse(session.getItem("regQueue") || "[]");
-    const dupInQueue = regQueue.some(r =>
-        r.playerId === registrationItem.playerId &&
-        r.seasonName === registrationItem.seasonName &&
-        r.sport === registrationItem.sport
-    );
-    if (dupInQueue) {
-        safeShow("#textError", "This player is already pending registration for this season and sport.");
-        return;
+    } catch (e) {
+        console.error("[Register] Failed to fetch division fee:", e);
     }
 
-    // Add to session queue
-    regQueue.push({ ...registrationItem, fee });
-    session.setItem("regQueue", JSON.stringify(regQueue));
-    console.log("Queue updated:", regQueue);
+        // Double-check for duplicates before adding to queue
+        const duplicateCheck = await checkForDuplicates(
+            registrationItem.playerId,
+            registrationItem.seasonName,
+            registrationItem.sport
+        );
+        if (duplicateCheck.isDuplicate) {
+            safeShow("#textError", duplicateCheck.message);
+            registerButton.enable(); // Re-enable on duplicate error
+            return;
+        }
 
-    // Go to checkout for this registration
-    safeShow("#textSuccess", "Success! Taking you to payment...");
-    const checkoutUrl = `/registration-checkout?player=${encodeURIComponent(registrationItem.playerName)}&sport=${encodeURIComponent(sport)}&division=${encodeURIComponent(division)}&amount=${fee}`;
-    setTimeout(() => wixLocation.to(checkoutUrl), 1000);
+        // Add to session queue
+        let regQueue = JSON.parse(session.getItem("regQueue") || "[]");
+        regQueue.push({ ...registrationItem, fee });
+        session.setItem("regQueue", JSON.stringify(regQueue));
+        console.log("Queue updated:", regQueue);
+
+        // Go to checkout for this registration
+        safeShow("#textSuccess", "Success! Taking you to payment...");
+        const checkoutUrl = `${ROUTES.CHECKOUT}?player=${encodeURIComponent(registrationItem.playerName)}&sport=${encodeURIComponent(sport)}&division=${encodeURIComponent(division)}&amount=${fee}`;
+        setTimeout(() => wixLocation.to(checkoutUrl), DELAYS.FORM_SUBMISSION_REDIRECT);
+        // Button stays disabled as we're navigating away
+
+    } catch (error) {
+        console.error("[Register Button] Unexpected error:", error);
+        safeShow("#textError", "An error occurred. Please try again.");
+        registerButton.enable(); // Re-enable on error
+    }
 });

@@ -1,8 +1,9 @@
 import { fetch } from "wix-fetch";
 import { getSecret } from "wix-secrets-backend";
+import { AIRTABLE } from 'public/constants.js';
 
-const BASE = "appVWHysw4oYfn9Ox";
-const TABLE = "ULL Financial Aid Applications";
+const BASE = AIRTABLE.BASE_ID_FINANCIAL_AID;
+const TABLE = AIRTABLE.TABLE_FINANCIAL_AID;
 
 const F = {
     email: "fldiWAzlBPYhKzLWM",
