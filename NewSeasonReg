@@ -1,0 +1,401 @@
+// FILE: New Season Registration Page (vc73t.js) – 2026 Flow
+import wixData from 'wix-data';
+import wixUsers from 'wix-users';
+import wixLocation from 'wix-location';
+import { getDivisionNote } from 'backend/airtable';
+import { session } from 'wix-storage';
+import { clearCurrentCart } from 'backend/cartManager';
+
+
+const REGISTRATION_COLLECTION = "SeasonRegistration";
+const PLAYER_COLLECTION = "UllPlayerList";
+
+let selectedPlayerId = null;
+let playerBirthDate = null;
+let playerDataMap = {};
+
+// ===== HELPER FUNCTIONS =====
+function safeShow(id, text = "") {
+    try {
+        const el = $w(id);
+        if (!el) return;
+        if (text && el.text !== undefined) el.text = text;
+        el.show();
+    } catch (e) {}
+}
+
+function safeHide(id) {
+    try { $w(id)?.hide(); } catch (e) {}
+}
+
+function safeCollapse(id) {
+    try { $w(id)?.collapse(); } catch (e) {}
+}
+
+function safeExpand(id) {
+    try { $w(id)?.expand(); } catch (e) {}
+}
+
+// ===== FORM VALIDATION =====
+function isFormValid() {
+    const requiredIds = [
+        "#inputSchool", "#dropdownJerseySize", "#inputEmergencyName", 
+        "#inputEmergencyPhone", "#teamParent", "#coachVolunteer"
+    ];
+    const checkboxes = ["#checkbox2", "#checkbox3", "#checkbox4"];
+    const playDown = $w("#PlayDown");
+    const otherSchool = $w("#inputSchoolother");
+
+    let valid = true;
+
+    requiredIds.forEach(id => {
+        try {
+            const el = $w(id);
+            if (el?.isVisible && !el.valid) valid = false;
+        } catch (e) {}
+    });
+
+    checkboxes.forEach(id => {
+        if (!$w(id).checked) valid = false;
+    });
+
+    if (playDown?.isVisible && !playDown.value) valid = false;
+    if (otherSchool?.isVisible && !otherSchool.value?.trim()) valid = false;
+
+    return valid;
+}
+
+// ===== SCHOOL "OTHER" LOGIC =====
+function handleSchoolOther() {
+    const school = $w("#inputSchool").value;
+    const other = $w("#inputSchoolother");
+
+    if (school === "Other/Not Listed") {
+        safeExpand("#inputSchoolother");
+        other.required = true;
+    } else {
+        safeCollapse("#inputSchoolother");
+        other.value = "";
+        other.required = false;
+    }
+    $w("#buttonRegister").disabled = !isFormValid();
+}
+
+// ===== VOLUNTEER FIELDS VISIBILITY =====
+function updateVolunteerFields() {
+    const teamParent = ($w("#teamParent").value || "").includes("Yes");
+    const coach = ($w("#coachVolunteer").value || "").includes("Yes");
+
+    ["#inputParentVolunteerName", "#inputParentVolunteerEmail", "#inputParentVolunteerPhone"].forEach(id => {
+        const el = $w(id);
+        if (teamParent) { safeExpand(id); el.required = true; }
+        else { safeCollapse(id); el.value = ""; el.required = false; }
+    });
+
+    ["#coachVolunteerType", "#volunteerCoachName", "#volunteerCoachEmail", "#volunteerCoachNumber"].forEach(id => {
+        const el = $w(id);
+        if (coach) { safeExpand(id); el.required = true; }
+        else { safeCollapse(id); el.value = ""; el.required = false; }
+    });
+
+    handleSchoolOther();
+    $w("#buttonRegister").disabled = !isFormValid();
+}
+
+// ===== MAIN FORM VISIBILITY =====
+function updateMainFormVisibility() {
+    const ready = $w('#dropdownPlayer').value && $w('#dropdownSeason').value && $w('#dropdownSport').value;
+    if (ready) {
+        safeShow('#group2');
+        safeShow('#group3');
+        safeShow('#buttonRegister');
+        updateVolunteerFields();
+    } else {
+        safeHide('#group2');
+        safeHide('#group3');
+        safeHide('#buttonRegister');
+    }
+}
+
+// ===== DIVISION + FEE LOOKUP =====
+async function loadDivisionAndFee(divisionKey) {
+    safeShow('#noteText', "Loading division info...");
+    safeHide('#textPlayDown');
+    safeHide('#PlayDown');
+
+    if (!divisionKey || divisionKey.includes("No ") || divisionKey.includes("Unknown")) {
+        safeShow('#noteText', "Select valid player, sport, and season.");
+        $w('#textFee').text = "";
+        return;
+    }
+
+    try {
+        const res = await getDivisionNote(divisionKey);
+        if (res.success) {
+
+            safeShow('#noteText', res.note || "");
+            $w('#textFee').text = res.fee > 0 ? `$${res.fee.toFixed(2)}` : "FREE";
+
+            // --- FIXED PLAY DOWN LOGIC ---
+            if (res.playDownEligible) {
+                safeExpand('#PlayDown');          // <-- important
+                safeShow('#PlayDown');
+                safeShow('#textPlayDown', "Eligible to request playing down");
+            } else {
+                safeHide('#PlayDown');
+            }
+
+            // --- Coach Request Logic ---
+            if (res.coachRequestEligible) {
+                safeExpand('#coachRequest');
+                safeShow('#coachRequest');
+            } else {
+                safeHide('#coachRequest');
+            }
+        }
+    } catch (e) {
+        safeShow('#noteText', "Division info unavailable.");
+    }
+}
+
+
+// ===== CLEAN DIVISION CALCULATION (2026 SEASON) =====
+const calculateDivision = async () => {
+    const playerOk = selectedPlayerId && playerBirthDate;
+    const seasonOk = $w("#dropdownSeason").value;
+    const sportOk = $w("#dropdownSport").value;
+
+    if (!playerOk || !seasonOk || !sportOk) {
+        $w("#textDivision").text = "Select player, season, and sport.";
+        updateMainFormVisibility();
+        return;
+    }
+
+    // Prevent duplicate based on already-paid registrations
+    try {
+        const existing = await wixData.query(REGISTRATION_COLLECTION)
+            .eq("player", selectedPlayerId)   // reference field
+            .eq("seasonName", seasonOk)
+            .eq("sport", sportOk)
+            .find();
+        if (existing.items.length > 0) {
+            $w("#textDivision").text = "Player already registered for this season.";
+            safeHide("#group2"); safeHide("#group3"); safeHide("#buttonRegister");
+            return;
+        }
+    } catch (e) {}
+
+    // calculate age
+    const bd = new Date(playerBirthDate);
+    const season = $w("#dropdownSeason").value;
+    const year = season.match(/\d{4}/)?.[0] || "2026";
+    const isFall = season.toLowerCase().includes("fall");
+    const cutoffMonth = sportOk === "Baseball" ? 7 : 0;  // July/Aug (month index 7 => Aug, but you used 7/31; we keep your original)
+    const cutoffDay = sportOk === "Baseball" ? 31 : 1;
+    const cutoffYear = isFall ? Number(year) + 1 : Number(year);
+    const cutoffDate = new Date(cutoffYear, cutoffMonth, cutoffDay);
+    const age = Math.floor((cutoffDate - bd) / (365.25 * 24 * 60 * 60 * 1000));
+
+    const suffix = isFall ? ".2" : ".1";
+    const seasonTag = ` - ${year}${suffix}`;
+
+    let division = "Unknown";
+    if (sportOk === "Baseball") {
+        if (age >= 14) division = "Baseball 14U Junior" + seasonTag;
+        else if (age === 13) division = "Baseball 13U Intermediate" + seasonTag;
+        else if (age >= 11 && age <= 12) division = "Baseball Majors" + seasonTag;
+        else if (age === 10) division = "Baseball Upper Minors" + seasonTag;
+        else if (age === 9) division = "Baseball Lower Minors" + seasonTag;
+        else if (age >= 7 && age <= 8) division = "Baseball Coach Pitch" + seasonTag;
+        else if (age === 6) division = "Baseball PeeWee 6" + seasonTag;
+        else if (age >= 4 && age <= 5) division = "Baseball PeeWee 4/5" + seasonTag;
+    }
+    else if (sportOk === "Softball") {
+        if (age >= 11 && age <= 12) division = "Softball Majors" + seasonTag;
+        else if (age >= 9 && age <= 10) division = "Softball Minors" + seasonTag;
+        else if (age >= 7 && age <= 8) division = "Softball Coach Pitch" + seasonTag;
+        else if (age >= 6 && age <= 7) division = "Softball Daisy League" + seasonTag;
+    } else {
+        division = "No division available";
+    }
+
+    $w("#textDivision").text = age >= 4 ? `Age ${age} → ${division}` : "Player too young/old";
+
+    await loadDivisionAndFee(division);
+    updateMainFormVisibility();
+};
+
+// ===== PAGE READY =====
+$w.onReady(async () => {
+    if (!wixUsers.currentUser.loggedIn) {
+        safeShow("#textError", "Please log in to register.");
+        return;
+    }
+
+    ["#group2","#group3","#buttonRegister","#textPlayDown","#PlayDown",
+     "#coachRequest","#inputSchoolother","#textError","#textSuccess"]
+        .forEach(safeHide);
+
+    $w("#teamParent").onChange(updateVolunteerFields);
+    $w("#coachVolunteer").onChange(updateVolunteerFields);
+    $w("#inputSchool").onChange(handleSchoolOther);
+
+    try {
+        const res = await wixData.query(PLAYER_COLLECTION)
+            .eq("reference", wixUsers.currentUser.id)
+            .find();
+
+        if (res.items.length === 0) {
+            safeShow("#textError", "No players found. Add a player first.");
+            return;
+        }
+
+        playerDataMap = {};
+        $w("#dropdownPlayer").options = res.items.map(p => {
+            playerDataMap[p._id] = {
+                birthDate: p.playerBirthDate,
+                firstName: p.firstName,
+                lastName: p.lastName
+            };
+            return { label: `${p.firstName} ${p.lastName}`, value: p._id };
+        });
+
+        safeShow("#group1");
+    } catch (e) {
+        safeShow("#textError", "Error loading players.");
+    }
+
+    $w("#dropdownPlayer").onChange(() => {
+        selectedPlayerId = $w("#dropdownPlayer").value;
+        playerBirthDate = playerDataMap[selectedPlayerId]?.birthDate;
+        calculateDivision();
+    });
+
+    $w("#dropdownSport").onChange(calculateDivision);
+    $w("#dropdownSeason").onChange(calculateDivision);
+
+    calculateDivision();
+
+        // ===== CLEAR CART + PENDING REGISTRATIONS BUTTON =====
+    if ($w('#buttonClearAllRegs')) {
+        $w('#buttonClearAllRegs').onClick(async () => {
+            console.log('[Reg Page] Clear All button clicked');
+            
+            // Disable to prevent double-click spam
+            $w('#buttonClearAllRegs').disable();
+
+            try {
+                // 1) Clear Wix eCommerce cart via backend
+                try {
+                    const result = await clearCurrentCart();
+                    console.log('[Reg Page] clearCurrentCart result:', result);
+                } catch (err) {
+                    console.error('[Reg Page] clearCurrentCart threw:', err);
+                    // We won't block the rest of the cleanup if this fails
+                }
+
+                // 2) Clear the local pending registrations queue
+                session.setItem('regQueue', '[]');
+                console.log('[Reg Page] regQueue cleared');
+
+                // 3) Optionally clear any status messages
+                try {
+                    if ($w('#textSuccess')) $w('#textSuccess').hide();
+                    if ($w('#textError'))   $w('#textError').hide();
+                } catch (e) {}
+
+                // 4) Optional: show a confirmation
+                try {
+                    if ($w('#textSuccess')) {
+                        $w('#textSuccess').text = 'Cart and pending registrations cleared.';
+                        $w('#textSuccess').show();
+                    }
+                } catch (e) {}
+
+                // NOTE: We *don’t* redirect here so the parent can keep working
+                // If you prefer to send them home, uncomment:
+                // wixLocation.to('/');
+
+            } finally {
+                // Re-enable button (mostly for dev; user may stay on page)
+                $w('#buttonClearAllRegs').enable();
+            }
+        });
+    }
+
+});
+
+// ===== REGISTER BUTTON =====
+$w("#buttonRegister").onClick(async () => {
+    if (!isFormValid()) {
+        safeShow("#textError", "Please complete all required fields.");
+        return;
+    }
+
+    const player = playerDataMap[selectedPlayerId];
+    const sport = $w("#dropdownSport").value;
+    const season = $w("#dropdownSeason").value;
+
+    const divText = $w("#textDivision").text;
+    const division = divText.split("→")[1]?.trim() || "Unknown";
+
+    const school = $w("#inputSchool").value === "Other/Not Listed"
+        ? $w("#inputSchoolother").value
+        : $w("#inputSchool").value;
+
+    const registrationItem = {
+        playerId: selectedPlayerId,                 // for reference field "player"
+        parentId: wixUsers.currentUser.id,          // for reference field "parent"
+        playerFirstName: player.firstName,
+        playerLastName: player.lastName,
+        playerName: `${player.firstName} ${player.lastName}`,
+        seasonName: season,
+        sport: sport,
+        division: division,
+        school: school,
+        jerseySize: $w("#dropdownJerseySize").value,
+        emergencyContactName: $w("#inputEmergencyName").value,
+        emergencyContactPhone: $w("#inputEmergencyPhone").value,
+        volunteerInterest: $w("#checkboxVolunteer")?.checked || false,
+        requestPlayDown: $w("#PlayDown").value || "",
+        coachRequest: $w("#coachRequest").value || "",
+        teamParentVolunteer: $w("#teamParent").value || "",
+        teamParentName: $w("#inputParentVolunteerName").value || "",
+        teamParentEmail: $w("#inputParentVolunteerEmail").value || "",
+        teamParentPhone: $w("#inputParentVolunteerPhone").value || "",
+        coachVolunteer: $w("#coachVolunteer").value || "",
+        coachVolunteerType: $w("#coachVolunteerType").value || "",
+        volunteerCoachName: $w("#volunteerCoachName").value || "",
+        volunteerCoachEmail: $w("#volunteerCoachEmail").value || "",
+        volunteerCoachNumber: $w("#volunteerCoachNumber").value || ""
+    };
+
+    // Fee from Airtable
+    let fee = 0;
+    try {
+        const noteRes = await getDivisionNote(division);
+        if (noteRes.success) fee = noteRes.fee || 0;
+    } catch (e) {}
+
+    // Prevent duplicate for this session (same player+season+sport)
+    let regQueue = JSON.parse(session.getItem("regQueue") || "[]");
+    const dupInQueue = regQueue.some(r =>
+        r.playerId === registrationItem.playerId &&
+        r.seasonName === registrationItem.seasonName &&
+        r.sport === registrationItem.sport
+    );
+    if (dupInQueue) {
+        safeShow("#textError", "This player is already pending registration for this season and sport.");
+        return;
+    }
+
+    // Add to session queue
+    regQueue.push({ ...registrationItem, fee });
+    session.setItem("regQueue", JSON.stringify(regQueue));
+    console.log("Queue updated:", regQueue);
+
+    // Go to checkout for this registration
+    safeShow("#textSuccess", "Success! Taking you to payment...");
+    const checkoutUrl = `/registration-checkout?player=${encodeURIComponent(registrationItem.playerName)}&sport=${encodeURIComponent(sport)}&division=${encodeURIComponent(division)}&amount=${fee}`;
+    setTimeout(() => wixLocation.to(checkoutUrl), 1000);
+});
