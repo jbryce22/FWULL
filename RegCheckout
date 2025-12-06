@@ -13,6 +13,22 @@ const HOME_URL = "/";
 const CART_URL = "/cart-page";
 
 /* ==========================================
+    INPUT SANITIZATION
+========================================== */
+function sanitizeInput(input) {
+    if (!input || typeof input !== 'string') return '';
+    // Remove any HTML tags and dangerous characters
+    return input
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;')
+        .replace(/\//g, '&#x2F;')
+        .trim()
+        .substring(0, 200); // Limit length to prevent abuse
+}
+
+/* ==========================================
     SESSION QUEUE HELPERS
 ========================================== */
 function getRegQueue() {
@@ -56,11 +72,14 @@ $w.onReady(async () => {
 function loadPageSummary() {
     const q = wixLocation.query;
 
-    $w("#textPlayerName").text = q.player || "";
-    $w("#textSport").text      = q.sport || "";
-    $w("#textDivision").text   = q.division || "";
+    // Sanitize all URL parameters to prevent XSS
+    $w("#textPlayerName").text = sanitizeInput(q.player);
+    $w("#textSport").text      = sanitizeInput(q.sport);
+    $w("#textDivision").text   = sanitizeInput(q.division);
 
-    let amount = Number(q.amount || 0);
+    // Validate amount is a number
+    let amount = parseFloat(q.amount);
+    if (isNaN(amount) || amount < 0) amount = 0;
     $w("#textFeeAmount").text = amount ? `$${amount.toFixed(2)}` : "";
 }
 
@@ -115,9 +134,21 @@ function removePlayerFromQueue(index) {
 
     // If queue is now empty, wipe UI from checkout page
     if (queue.length === 0) {
-        try { $w("#repeaterCartPlayers").data = []; } catch (e) {}
-        try { $w("#textPendingCount").text = "No pending registrations."; } catch (e) {}
-        try { $w("#textCartSubtotal").text = "$0.00"; } catch (e) {}
+        try {
+            $w("#repeaterCartPlayers").data = [];
+        } catch (e) {
+            console.warn('[removePlayerFromQueue] Failed to clear repeater:', e);
+        }
+        try {
+            $w("#textPendingCount").text = "No pending registrations.";
+        } catch (e) {
+            console.warn('[removePlayerFromQueue] Failed to update pending count:', e);
+        }
+        try {
+            $w("#textCartSubtotal").text = "$0.00";
+        } catch (e) {
+            console.warn('[removePlayerFromQueue] Failed to update subtotal:', e);
+        }
     }
 
     // ALWAYS take user back to registration page to add a new player
@@ -131,7 +162,7 @@ function removePlayerFromQueue(index) {
 function isDuplicateInQueue(division) {
     const queue = getRegQueue();
     const q = wixLocation.query;
-    const playerName = q.player || "";
+    const playerName = sanitizeInput(q.player);
 
     const count = queue.filter(r =>
         r.playerName === playerName &&
@@ -177,7 +208,11 @@ function setupButtons() {
 $w('#buttonClearRegistrations').onClick(async () => {
     console.log('[Checkout] buttonClearRegistrations clicked');
 
-    // Optional: disable buttons to prevent double-clicks
+    // TODO: Add confirmation modal for better UX
+    // Recommended: Create a custom lightbox with "Are you sure?" message
+    // For now, we rely on clear button labeling to prevent accidents
+
+    // Disable immediately to prevent double-clicks
     $w('#buttonClearRegistrations').disable();
     if ($w('#buttonPay')) $w('#buttonPay').disable();
     if ($w('#buttonAnotherReg')) $w('#buttonAnotherReg').disable();
@@ -201,14 +236,16 @@ $w('#buttonClearRegistrations').onClick(async () => {
                 $w('#repeaterCartPlayers').data = [];
             }
         } catch (e) {
-            console.warn('Could not clear repeaterPlayers data:', e);
+            console.warn('[Checkout] Could not clear repeaterPlayers data:', e);
         }
 
         try {
             if ($w('#textPendingCount')) {
                 $w('#textPendingCount').text = 'No players pending registration.';
             }
-        } catch (e) {}
+        } catch (e) {
+            console.warn('[Checkout] Could not update pending count text:', e);
+        }
 
         try {
             if ($w('#textPlayerName')) $w('#textPlayerName').text = '';
@@ -217,7 +254,7 @@ $w('#buttonClearRegistrations').onClick(async () => {
             if ($w('#textFeeAmount'))  $w('#textFeeAmount').text = '$0.00';
             if ($w('#textCartSubtotal')) $w('#textCartSubtotal').text = '$0.00';
         } catch (e) {
-            console.warn('Could not clear header fields:', e);
+            console.warn('[Checkout] Could not clear header fields:', e);
         }
 
         // 4) Navigate home
@@ -240,38 +277,6 @@ function showDuplicateWarning() {
     $w("#textDuplicateWarning").text =
         "This player is already in your pending registrations.";
     $w("#textDuplicateWarning").show();
-}
-
-/* ==========================================
-    CLEAR ALL REGISTRATIONS + CART
-========================================== */
-async function clearAllRegistrations() {
-    setRegQueue([]);
-
-    // Correct cart clearing API
-    try {
-        //await cart.setCart({ lineItems: [] });
-        console.log("Cart cleared using setCart()");
-    } catch (err) {
-        console.error("Cart clear error:", err);
-    }
-
-    // Reset UI
-    $w("#textPlayerName").text = "";
-    $w("#textSport").text = "";
-    $w("#textDivision").text = "";
-    $w("#textFeeAmount").text = "";
-    $w("#textPendingCount").text = "";
-    $w("#textCartSubtotal").text = "";
-
-    $w("#repeaterCartPlayers").data = [];
-
-    $w("#textCartMismatchWarning").hide();
-    $w("#textDuplicateWarning").hide();
-    $w("#textError").hide();
-    $w("#textStatus").hide();
-
-    wixLocation.to(HOME_URL);
 }
 
 /* ==========================================

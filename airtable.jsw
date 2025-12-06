@@ -44,6 +44,13 @@ export async function getDivisionNote(division) {
         return { success: true, note: '', fee: 0, playDownEligible: false, coachRequestEligible: false };
     }
 
+    // Validate division format (defense in depth)
+    // Expected format: "Sport Division - YYYY.N" (e.g., "Baseball Majors - 2026.1")
+    if (division.length > 100) {
+        console.error('[Backend] Division string too long, possible injection attempt');
+        return { success: false, error: 'Invalid division format' };
+    }
+
     let token;
     try {
         token = await getToken?.();
@@ -58,10 +65,18 @@ export async function getDivisionNote(division) {
     }
 
     // ---- BUILD FILTER --------------------------------------------
-    const safeDiv = division.replace(/'/g, "\\'");
+    // Properly escape division value to prevent formula injection
+    // Airtable formulas require proper escaping of quotes, backslashes, and special chars
+    const safeDiv = division
+        .replace(/\\/g, '\\\\')  // Escape backslashes first
+        .replace(/'/g, "\\'")     // Escape single quotes
+        .replace(/"/g, '\\"')     // Escape double quotes
+        .replace(/\n/g, '\\n')    // Escape newlines
+        .replace(/\r/g, '\\r');   // Escape carriage returns
+
     const formula = `({${DIV_FIELD}} = '${safeDiv}')`;
     const url = `https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent(DIV_LOOKUP_TABLE)}?filterByFormula=${encodeURIComponent(formula)}`;
-    console.log('[Backend] URL →', url);
+    console.log('[Backend] Airtable query for division:', division);
 
     // ---- CALL AIRTABLE -------------------------------------------
     try {

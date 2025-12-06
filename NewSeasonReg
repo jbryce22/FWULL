@@ -21,19 +21,33 @@ function safeShow(id, text = "") {
         if (!el) return;
         if (text && el.text !== undefined) el.text = text;
         el.show();
-    } catch (e) {}
+    } catch (e) {
+        console.warn(`[safeShow] Failed to show element ${id}:`, e.message);
+    }
 }
 
 function safeHide(id) {
-    try { $w(id)?.hide(); } catch (e) {}
+    try {
+        $w(id)?.hide();
+    } catch (e) {
+        console.warn(`[safeHide] Failed to hide element ${id}:`, e.message);
+    }
 }
 
 function safeCollapse(id) {
-    try { $w(id)?.collapse(); } catch (e) {}
+    try {
+        $w(id)?.collapse();
+    } catch (e) {
+        console.warn(`[safeCollapse] Failed to collapse element ${id}:`, e.message);
+    }
 }
 
 function safeExpand(id) {
-    try { $w(id)?.expand(); } catch (e) {}
+    try {
+        $w(id)?.expand();
+    } catch (e) {
+        console.warn(`[safeExpand] Failed to expand element ${id}:`, e.message);
+    }
 }
 
 // ===== FORM VALIDATION =====
@@ -320,8 +334,12 @@ $w.onReady(async () => {
     if ($w('#buttonClearAllRegs')) {
         $w('#buttonClearAllRegs').onClick(async () => {
             console.log('[Reg Page] Clear All button clicked');
-            
-            // Disable to prevent double-click spam
+
+            // TODO: Add confirmation modal for better UX
+            // Recommended: Create a custom lightbox with "Are you sure?" message
+            // For now, we rely on clear button labeling to prevent accidents
+
+            // Disable immediately to prevent double-click spam
             $w('#buttonClearAllRegs').disable();
 
             try {
@@ -342,7 +360,9 @@ $w.onReady(async () => {
                 try {
                     if ($w('#textSuccess')) $w('#textSuccess').hide();
                     if ($w('#textError'))   $w('#textError').hide();
-                } catch (e) {}
+                } catch (e) {
+                    console.warn('[Reg Page] Failed to hide status messages:', e);
+                }
 
                 // 4) Optional: show a confirmation
                 try {
@@ -350,7 +370,9 @@ $w.onReady(async () => {
                         $w('#textSuccess').text = 'Cart and pending registrations cleared.';
                         $w('#textSuccess').show();
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.warn('[Reg Page] Failed to show success message:', e);
+                }
 
                 // NOTE: We *don’t* redirect here so the parent can keep working
                 // If you prefer to send them home, uncomment:
@@ -367,10 +389,16 @@ $w.onReady(async () => {
 
 // ===== REGISTER BUTTON =====
 $w("#buttonRegister").onClick(async () => {
-    if (!isFormValid()) {
-        safeShow("#textError", "Please complete all required fields.");
-        return;
-    }
+    // Disable button immediately to prevent double-click
+    const registerButton = $w("#buttonRegister");
+    registerButton.disable();
+
+    try {
+        if (!isFormValid()) {
+            safeShow("#textError", "Please complete all required fields.");
+            registerButton.enable(); // Re-enable on validation error
+            return;
+        }
 
     const player = playerDataMap[selectedPlayerId];
     const sport = $w("#dropdownSport").value;
@@ -415,27 +443,37 @@ $w("#buttonRegister").onClick(async () => {
     try {
         const noteRes = await getDivisionNote(division);
         if (noteRes.success) fee = noteRes.fee || 0;
-    } catch (e) {}
-
-    // Double-check for duplicates before adding to queue
-    const duplicateCheck = await checkForDuplicates(
-        registrationItem.playerId,
-        registrationItem.seasonName,
-        registrationItem.sport
-    );
-    if (duplicateCheck.isDuplicate) {
-        safeShow("#textError", duplicateCheck.message);
-        return;
+    } catch (e) {
+        console.error("[Register] Failed to fetch division fee:", e);
     }
 
-    // Add to session queue
-    let regQueue = JSON.parse(session.getItem("regQueue") || "[]");
-    regQueue.push({ ...registrationItem, fee });
-    session.setItem("regQueue", JSON.stringify(regQueue));
-    console.log("Queue updated:", regQueue);
+        // Double-check for duplicates before adding to queue
+        const duplicateCheck = await checkForDuplicates(
+            registrationItem.playerId,
+            registrationItem.seasonName,
+            registrationItem.sport
+        );
+        if (duplicateCheck.isDuplicate) {
+            safeShow("#textError", duplicateCheck.message);
+            registerButton.enable(); // Re-enable on duplicate error
+            return;
+        }
 
-    // Go to checkout for this registration
-    safeShow("#textSuccess", "Success! Taking you to payment...");
-    const checkoutUrl = `/registration-checkout?player=${encodeURIComponent(registrationItem.playerName)}&sport=${encodeURIComponent(sport)}&division=${encodeURIComponent(division)}&amount=${fee}`;
-    setTimeout(() => wixLocation.to(checkoutUrl), 1000);
+        // Add to session queue
+        let regQueue = JSON.parse(session.getItem("regQueue") || "[]");
+        regQueue.push({ ...registrationItem, fee });
+        session.setItem("regQueue", JSON.stringify(regQueue));
+        console.log("Queue updated:", regQueue);
+
+        // Go to checkout for this registration
+        safeShow("#textSuccess", "Success! Taking you to payment...");
+        const checkoutUrl = `/registration-checkout?player=${encodeURIComponent(registrationItem.playerName)}&sport=${encodeURIComponent(sport)}&division=${encodeURIComponent(division)}&amount=${fee}`;
+        setTimeout(() => wixLocation.to(checkoutUrl), 1000);
+        // Button stays disabled as we're navigating away
+
+    } catch (error) {
+        console.error("[Register Button] Unexpected error:", error);
+        safeShow("#textError", "An error occurred. Please try again.");
+        registerButton.enable(); // Re-enable on error
+    }
 });

@@ -129,14 +129,45 @@ $w.onReady(async () => {
                 datePaid: new Date()
             };
 
-            const created = await wixData.insert("SeasonRegistration", itemToInsert);
+            // Insert to database with initial sync status
+            const itemWithSyncStatus = {
+                ...itemToInsert,
+                airtableSyncStatus: 'pending',
+                airtableSyncAttempts: 0
+            };
+            const created = await wixData.insert("SeasonRegistration", itemWithSyncStatus);
             console.log("Inserted SeasonRegistration:", created._id);
 
-            // Sync to Airtable
+            // Sync to Airtable with error handling and status tracking
             try {
                 await syncRegistrationToAirtable(created);
+
+                // Update sync status to success
+                await wixData.update("SeasonRegistration", {
+                    _id: created._id,
+                    airtableSyncStatus: 'synced',
+                    airtableSyncedAt: new Date()
+                });
+                console.log("Airtable sync successful for", created._id);
+
             } catch (e) {
                 console.error("Airtable sync failed for", created._id, e);
+
+                // Update sync status to failed for retry later
+                try {
+                    await wixData.update("SeasonRegistration", {
+                        _id: created._id,
+                        airtableSyncStatus: 'failed',
+                        airtableSyncError: e.message || String(e),
+                        airtableSyncAttempts: 1,
+                        lastSyncAttempt: new Date()
+                    });
+                } catch (updateErr) {
+                    console.error("Failed to update sync status for", created._id, updateErr);
+                }
+
+                // Continue processing - don't block user flow on Airtable failures
+                // Admin can retry failed syncs later via backend job
             }
 
             summaryLines.push(`${reg.playerName} – ${reg.division}`);
