@@ -1,0 +1,40 @@
+// backend/cartManager.jsw
+import { currentCart } from 'wix-ecom-backend';
+
+/**
+ * Clears the *current* Wix eCommerce cart for this visitor.
+ * Safe to call even if no cart or an empty cart exists.
+ */
+export async function clearCurrentCart() {
+    console.log('[cartManager] clearCurrentCart called');
+
+    try {
+        const cart = await currentCart.getCurrentCart();
+        console.log('[cartManager] getCurrentCart result:', cart);
+
+        // If there is no cart or no lineItems, nothing to delete
+        if (!cart || !cart._id || !cart.lineItems || cart.lineItems.length === 0) {
+            console.log('[cartManager] No cart or already empty, nothing to clear.');
+            return {
+                success: true,
+                cleared: false,
+                reason: 'no-cart-or-empty'
+            };
+        }
+
+        // Delete the current cart
+        await currentCart.deleteCurrentCart();
+        console.log('[cartManager] deleteCurrentCart success');
+
+        return {
+            success: true,
+            cleared: true
+        };
+    } catch (error) {
+        console.error('[cartManager] deleteCurrentCart error:', error);
+        return {
+            success: false,
+            error: error.message || String(error)
+        };
+    }
+}
