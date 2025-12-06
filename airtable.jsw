@@ -7,7 +7,7 @@ let getToken;
 // ---- OPTION A – USE WIX SECRETS (preferred) ----
 try {
     const secrets = require('wix-secrets-backend');
-    
+
     getToken = async () => {
         console.log('[Backend] Trying secrets.getSecret...');
         // Replace 'AIRTABLE_TOKEN' if you used a different key name in Wix Secrets
@@ -21,13 +21,13 @@ try {
 
 // -----------------------------------------------------------------
 // --- CONSTANTS FOR AIRTABLE BASE & TABLES ---
-const BASE_ID      = 'appU008DNqprqcBR3';
+const BASE_ID      = 'appU008DNqprqcBR3';
 
 // Constants for the Division Lookup (getDivisionNote)
-const DIV_LOOKUP_TABLE  = 'Divisions'; // Table used by getDivisionNote
-const DIV_FIELD    = 'Division and Year';
-const NOTE_FIELD   = 'Division Specific Note';
-const FEE_FIELD    = 'Registration Fee';
+const DIV_LOOKUP_TABLE  = 'Divisions'; // Table used by getDivisionNote
+const DIV_FIELD    = 'Division and Year';
+const NOTE_FIELD   = 'Division Specific Note';
+const FEE_FIELD    = 'Registration Fee';
 const PLAY_DOWN_FIELD = 'Play Down Eligible Division?';
 const COACH_REQUEST = 'Coach Request Eligible Division?'; // Eligibility for coach request
 
@@ -38,67 +38,67 @@ const REG_SYNC_TABLE = "All Players by Year"; // <-- CRITICAL: VERIFY YOUR AIRTA
 // --- 1. DIVISION NOTE LOOKUP FUNCTION ---
 
 export async function getDivisionNote(division) {
-    console.log('[Backend] getDivisionNote →', division);
+    console.log('[Backend] getDivisionNote →', division);
 
-    if (!division?.trim()) {
-        return { success: true, note: '', fee: 0, playDownEligible: false, coachRequestEligible: false };
-    }
+    if (!division?.trim()) {
+        return { success: true, note: '', fee: 0, playDownEligible: false, coachRequestEligible: false };
+    }
 
-    let token;
-    try {
-        token = await getToken?.();
-    } catch (err) {
-        console.error('[Backend] getToken threw:', err);
-        return { success: false, error: 'Token error' };
-    }
+    let token;
+    try {
+        token = await getToken?.();
+    } catch (err) {
+        console.error('[Backend] getToken threw:', err);
+        return { success: false, error: 'Token error' };
+    }
 
-    if (!token) {
-        console.error('[Backend] No token available');
-        return { success: false, error: 'Missing token' };
-    }
+    if (!token) {
+        console.error('[Backend] No token available');
+        return { success: false, error: 'Missing token' };
+    }
 
-    // ---- BUILD FILTER --------------------------------------------
-    const safeDiv = division.replace(/'/g, "\\'");
-    const formula = `({${DIV_FIELD}} = '${safeDiv}')`;
-    const url = `https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent(DIV_LOOKUP_TABLE)}?filterByFormula=${encodeURIComponent(formula)}`;
-    console.log('[Backend] URL →', url);
+    // ---- BUILD FILTER --------------------------------------------
+    const safeDiv = division.replace(/'/g, "\\'");
+    const formula = `({${DIV_FIELD}} = '${safeDiv}')`;
+    const url = `https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent(DIV_LOOKUP_TABLE)}?filterByFormula=${encodeURIComponent(formula)}`;
+    console.log('[Backend] URL →', url);
 
-    // ---- CALL AIRTABLE -------------------------------------------
-    try {
-        const res = await fetch(url, {
-            headers: { Authorization: `Bearer ${token}` }
-        });
+    // ---- CALL AIRTABLE -------------------------------------------
+    try {
+        const res = await fetch(url, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
 
-        if (!res.ok) {
-            const txt = await res.text();
-            console.error('[Backend] Airtable error body →', txt);
-            return { success: false, error: `HTTP ${res.status}` };
-        }
+        if (!res.ok) {
+            const txt = await res.text();
+            console.error('[Backend] Airtable error body →', txt);
+            return { success: false, error: `HTTP ${res.status}` };
+        }
 
-        const json = await res.json();
-        
-        if (!json.records || json.records.length === 0) {
-            console.warn(`[Backend] WARNING: No AirTable record found for key: ${division}`);
-            return { success: true, note: 'No division details found.', fee: 0, playDownEligible: false, coachRequestEligible: false };
-        }
-        
-        const record = json.records[0].fields;
+        const json = await res.json();
 
-        const note = record?.[NOTE_FIELD] ?? 'No note';
-        const fee = record?.[FEE_FIELD] ?? 0;
+        if (!json.records || json.records.length === 0) {
+            console.warn(`[Backend] WARNING: No AirTable record found for key: ${division}`);
+            return { success: true, note: 'No division details found.', fee: 0, playDownEligible: false, coachRequestEligible: false };
+        }
 
-        const playDownEligible = record?.[PLAY_DOWN_FIELD] === 'Yes';
-        const coachRequestEligible = record?.[COACH_REQUEST] === 'Yes';
+        const record = json.records[0].fields;
 
-        console.log('[Backend] Play Down Eligible? →', playDownEligible);
-        console.log('[Backend] Coach Request Eligible? →', coachRequestEligible);
-        
-        return { success: true, note, fee, playDownEligible, coachRequestEligible };
+        const note = record?.[NOTE_FIELD] ?? 'No note';
+        const fee = record?.[FEE_FIELD] ?? 0;
 
-    } catch (err) {
-        console.error('[Backend] fetch exception →', err);
-        return { success: false, error: err.message };
-    }
+        const playDownEligible = record?.[PLAY_DOWN_FIELD] === 'Yes';
+        const coachRequestEligible = record?.[COACH_REQUEST] === 'Yes';
+
+        console.log('[Backend] Play Down Eligible? →', playDownEligible);
+        console.log('[Backend] Coach Request Eligible? →', coachRequestEligible);
+
+        return { success: true, note, fee, playDownEligible, coachRequestEligible };
+
+    } catch (err) {
+        console.error('[Backend] fetch exception →', err);
+        return { success: false, error: err.message };
+    }
 }
 
 
@@ -106,76 +106,76 @@ export async function getDivisionNote(division) {
 // --- 2. REGISTRATION SYNC FUNCTION ---
 
 export async function syncRegistrationToAirtable(regDoc) {
-    console.log(`[Backend] syncRegistrationToAirtable() for Reg ID: ${regDoc?._id} to table ${REG_SYNC_TABLE}`);
+    console.log(`[Backend] syncRegistrationToAirtable() for Reg ID: ${regDoc?._id} to table ${REG_SYNC_TABLE}`);
 
-    if (!regDoc?._id) {
+    if (!regDoc?._id) {
         console.error("[Backend] Invalid registration document received.");
         throw new Error("Invalid registration document.");
     }
 
-    let token;
-    try {
-        token = await getToken?.();
-    } catch (err) {
-        console.error("[Backend] getToken threw:", err);
-        throw new Error("Token error");
-    }
+    let token;
+    try {
+        token = await getToken?.();
+    } catch (err) {
+        console.error("[Backend] getToken threw:", err);
+        throw new Error("Token error");
+    }
 
-    if (!token) {
-        console.error("[Backend] No Airtable token available.");
-        throw new Error("Missing Airtable token");
-    }
+    if (!token) {
+        console.error("[Backend] No Airtable token available.");
+        throw new Error("Missing Airtable token");
+    }
 
-    const url = `https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent(REG_SYNC_TABLE)}`;
+    const url = `https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent(REG_SYNC_TABLE)}`;
 
-    // Prepare Single Select fields: AirTable Single Selects must match the option name exactly
-    const playDownValue = regDoc.requestPlayDown ? 'Yes' : 'No'; 
+    // Prepare Single Select fields: AirTable Single Selects must match the option name exactly
+    const playDownValue = regDoc.requestPlayDown ? 'Yes' : 'No';
     // Assuming coachRequest holds a name or text. If it's a checkbox, adjust this.
-    const coachRequestValue = regDoc.coachRequest ?? ''; 
+    const coachRequestValue = regDoc.coachRequest ?? '';
 
-    // ----- MAPPED FIELDS USING AIRTABLE FIELD IDs (YOUR LIST) -----
-    const fields = {
-        // Date Fields
-        "fldqdFthduXPFvTeH": new Date(regDoc.datePaid || regDoc._updatedDate || new Date()).toISOString(), // Registration Date
-        
-        // Player Info (Single Line Text)
+    // ----- MAPPED FIELDS USING AIRTABLE FIELD IDs (YOUR LIST) -----
+    const fields = {
+        // Date Fields
+        "fldqdFthduXPFvTeH": new Date(regDoc.datePaid || regDoc._updatedDate || new Date()).toISOString(), // Registration Date
+
+        // Player Info (Single Line Text)
         // **CAUTION: fldcxSZcJ2c2tSBdx is 'Volunteer First Name'. Assuming it's used for Player First Name.**
-        "fldBQnKkcHQfFsRlE": regDoc.playerFirstName ?? '',  // Player First Name (Mapped to Volunteer First Name ID)
-        "fldKOEUqF5QkTSbpu": regDoc.playerLastName ?? '',    // Last Name
-        //"flddIm4AFISBemJ0i": coachRequestValue,                       // Coach Request (Text Field)
+        "fldBQnKkcHQfFsRlE": regDoc.playerFirstName ?? '',  // Player First Name (Mapped to Volunteer First Name ID)
+        "fldKOEUqF5QkTSbpu": regDoc.playerLastName ?? '',    // Last Name
+        "flddIm4AFISBemJ0i": coachRequestValue,                       // Coach Request (Text Field)
 
-        // Single Select Fields
-        //"fldQCpHIic6EZHwYT": regDoc.division ?? 'N/A',                       // Division
-        //"fld0qO9VUfvrsiNrd": regDoc.sport ?? 'N/A',                          // Sport
-        //"fldm3PJS7MzAB30bW": regDoc.jerseySize ?? '',                         // Jersey Size
-        //"fldZBze7shCMpRSwB": regDoc.school ?? '',                            // School
-        //"fldjkJpZ8wDhP6MxI": playDownValue,                             // Play Up/Down Request ('Yes' or 'No')
-        
+        // Single Select Fields
+        "fldQCpHIic6EZHwYT": regDoc.division ?? 'N/A',                       // Division
+        "fld0qO9VUfvrsiNrd": regDoc.sport ?? 'N/A',                          // Sport
+        "fldm3PJS7MzAB30bW": regDoc.jerseySize ?? '',                         // Jersey Size
+        "fldZBze7shCMpRSwB": regDoc.school ?? '',                            // School
+        "fldjkJpZ8wDhP6MxI": playDownValue,                             // Play Up/Down Request ('Yes' or 'No')
+
         // Recommended Additional Tracking Fields (Create these fields in AirTable if they don't exist)
-        "fldMjkKEIeXzIAEs2": regDoc._id, 
-         "fld10em0hUD42rIFi": regDoc.fee ?? 0, 
-    };
+        "fldMjkKEIeXzIAEs2": regDoc._id,
+         "fld10em0hUD42rIFi": regDoc.fee ?? 0,
+    };
 
-    console.log("[Backend] Sending fields to Airtable:", fields);
+    console.log("[Backend] Sending fields to Airtable:", fields);
 
-    const response = await fetch(url, {
-        method: 'post',
-        headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            records: [{ fields }]
-        })
-    });
+    const response = await fetch(url, {
+        method: 'post',
+        headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            records: [{ fields }]
+        })
+    });
 
-    if (!response.ok) {
-        const text = await response.text();
-        console.error("Airtable sync failed. Response:", text);
-        throw new Error(`Airtable sync failed: ${text}`);
-    }
+    if (!response.ok) {
+        const text = await response.text();
+        console.error("Airtable sync failed. Response:", text);
+        throw new Error(`Airtable sync failed: ${text}`);
+    }
 
-    const result = await response.json();
-    console.log("[Backend] Airtable synced OK. Result:", result);
-    return result;
+    const result = await response.json();
+    console.log("[Backend] Airtable synced OK. Result:", result);
+    return result;
 }
