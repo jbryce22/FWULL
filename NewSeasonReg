@@ -159,6 +159,48 @@ async function loadDivisionAndFee(divisionKey) {
 }
 
 
+// ===== DUPLICATE CHECK FUNCTION =====
+async function checkForDuplicates(playerId, seasonName, sport) {
+    // Check 1: CMS SeasonRegistration collection (already paid registrations)
+    try {
+        const existing = await wixData.query(REGISTRATION_COLLECTION)
+            .eq("player", playerId)
+            .eq("seasonName", seasonName)
+            .eq("sport", sport)
+            .find();
+        if (existing.items.length > 0) {
+            return {
+                isDuplicate: true,
+                type: 'cms',
+                message: "Player already registered for this season and sport in our records."
+            };
+        }
+    } catch (e) {
+        console.error("CMS duplicate check error:", e);
+    }
+
+    // Check 2: Session regQueue (pending registrations)
+    try {
+        const regQueue = JSON.parse(session.getItem("regQueue") || "[]");
+        const duplicate = regQueue.find(r =>
+            r.playerId === playerId &&
+            r.seasonName === seasonName &&
+            r.sport === sport
+        );
+        if (duplicate) {
+            return {
+                isDuplicate: true,
+                type: 'queue',
+                message: "Player already has a pending registration for this season and sport."
+            };
+        }
+    } catch (e) {
+        console.error("RegQueue duplicate check error:", e);
+    }
+
+    return { isDuplicate: false };
+}
+
 // ===== CLEAN DIVISION CALCULATION (2026 SEASON) =====
 const calculateDivision = async () => {
     const playerOk = selectedPlayerId && playerBirthDate;
@@ -171,19 +213,17 @@ const calculateDivision = async () => {
         return;
     }
 
-    // Prevent duplicate based on already-paid registrations
-    try {
-        const existing = await wixData.query(REGISTRATION_COLLECTION)
-            .eq("player", selectedPlayerId)   // reference field
-            .eq("seasonName", seasonOk)
-            .eq("sport", sportOk)
-            .find();
-        if (existing.items.length > 0) {
-            $w("#textDivision").text = "Player already registered for this season.";
-            safeHide("#group2"); safeHide("#group3"); safeHide("#buttonRegister");
-            return;
-        }
-    } catch (e) {}
+    // Check for duplicates in both CMS and regQueue
+    const duplicateCheck = await checkForDuplicates(selectedPlayerId, seasonOk, sportOk);
+    if (duplicateCheck.isDuplicate) {
+        $w("#textDivision").text = duplicateCheck.message;
+        safeShow("#textError", duplicateCheck.message);
+        safeHide("#group2"); safeHide("#group3"); safeHide("#buttonRegister");
+        return;
+    }
+
+    // Clear any previous error messages
+    safeHide("#textError");
 
     // calculate age
     const bd = new Date(playerBirthDate);
@@ -377,19 +417,19 @@ $w("#buttonRegister").onClick(async () => {
         if (noteRes.success) fee = noteRes.fee || 0;
     } catch (e) {}
 
-    // Prevent duplicate for this session (same player+season+sport)
-    let regQueue = JSON.parse(session.getItem("regQueue") || "[]");
-    const dupInQueue = regQueue.some(r =>
-        r.playerId === registrationItem.playerId &&
-        r.seasonName === registrationItem.seasonName &&
-        r.sport === registrationItem.sport
+    // Double-check for duplicates before adding to queue
+    const duplicateCheck = await checkForDuplicates(
+        registrationItem.playerId,
+        registrationItem.seasonName,
+        registrationItem.sport
     );
-    if (dupInQueue) {
-        safeShow("#textError", "This player is already pending registration for this season and sport.");
+    if (duplicateCheck.isDuplicate) {
+        safeShow("#textError", duplicateCheck.message);
         return;
     }
 
     // Add to session queue
+    let regQueue = JSON.parse(session.getItem("regQueue") || "[]");
     regQueue.push({ ...registrationItem, fee });
     session.setItem("regQueue", JSON.stringify(regQueue));
     console.log("Queue updated:", regQueue);
