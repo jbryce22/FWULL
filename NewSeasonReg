@@ -231,9 +231,21 @@ const calculateDivision = async () => {
     // Check for duplicates in both CMS and regQueue
     const duplicateCheck = await checkForDuplicates(selectedPlayerId, seasonOk, sportOk);
     if (duplicateCheck.isDuplicate) {
-        $w("#textDivision").text = duplicateCheck.message;
-        safeShow("#textError", duplicateCheck.message);
-        safeHide("#group2"); safeHide("#group3"); safeHide("#buttonRegister");
+        // Show duplicate message in division note area
+        safeShow('#noteText', duplicateCheck.message);
+        $w("#textDivision").text = duplicateCheck.type === 'queue'
+            ? "Player already in cart"
+            : "Player already registered";
+        $w('#textFee').text = "";
+
+        // Hide form groups and buttons
+        safeHide("#group2");
+        safeHide("#group3");
+        safeHide("#buttonRegister");
+        safeHide('#textPlayDown');
+        safeHide('#PlayDown');
+        safeHide('#coachRequest');
+
         return;
     }
 
@@ -419,7 +431,8 @@ $w("#buttonRegister").onClick(async () => {
         : $w("#inputSchool").value;
 
     const registrationItem = {
-        playerId: selectedPlayerId,                 // for reference field "player"
+        playerId: selectedPlayerId,         
+        playerBirthDate: player.birthDate,   // ← ADD THIS LINE        // for reference field "player"
         parentId: wixUsers.currentUser.id,          // for reference field "parent"
         playerFirstName: player.firstName,
         playerLastName: player.lastName,
