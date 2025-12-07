@@ -426,9 +426,14 @@ $w("#buttonRegister").onClick(async () => {
     const divText = $w("#textDivision").text;
     const division = divText.split("→")[1]?.trim() || "Unknown";
 
-    const school = $w("#inputSchool").value === FORM_OPTIONS.SCHOOL_OTHER
+    // Capture school dropdown value AND "other" text separately for Airtable
+    const schoolDropdown = $w("#inputSchool").value;
+    const schoolOther = schoolDropdown === FORM_OPTIONS.SCHOOL_OTHER
         ? $w("#inputSchoolother").value
-        : $w("#inputSchool").value;
+        : "";
+    const school = schoolDropdown === FORM_OPTIONS.SCHOOL_OTHER
+        ? $w("#inputSchoolother").value
+        : schoolDropdown;
 
     const registrationItem = {
         playerId: selectedPlayerId,                 // for reference field "player"
@@ -439,7 +444,8 @@ $w("#buttonRegister").onClick(async () => {
         seasonName: season,
         sport: sport,
         division: division,
-        school: school,
+        school: school,                             // For Wix DB and display
+        schoolOther: schoolOther,                   // For Airtable "School (Other)" field
         jerseySize: $w("#dropdownJerseySize").value,
         emergencyContactName: $w("#inputEmergencyName").value,
         emergencyContactPhone: $w("#inputEmergencyPhone").value,
