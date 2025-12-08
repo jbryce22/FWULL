@@ -1,7 +1,39 @@
 // backend/airtable.jsw
 import { fetch } from 'wix-fetch';
 import wixData from 'wix-data';
-import { AIRTABLE, VALIDATION, COLLECTIONS } from './constants.js';
+
+// Import constants - inline for backend compatibility
+const COLLECTIONS = {
+    REGISTRATION: "SeasonRegistration",
+    PLAYER: "UllPlayerList"
+};
+
+const AIRTABLE = {
+    BASE_ID_MAIN: 'appU008DNqprqcBR3',
+    BASE_ID_FINANCIAL_AID: 'appVWHysw4oYfn9Ox',
+    TABLE_DIVISIONS: 'Divisions',
+    TABLE_ALL_PLAYERS: 'All Players by Year',
+    TABLE_FINANCIAL_AID: 'ULL Financial Aid Applications',
+    FIELD_DIVISION_AND_YEAR: 'Division and Year',
+    FIELD_DIVISION_NOTE: 'Division Specific Note',
+    FIELD_REGISTRATION_FEE: 'Registration Fee',
+    FIELD_PLAY_DOWN_ELIGIBLE: 'Play Down Eligible Division?',
+    FIELD_COACH_REQUEST_ELIGIBLE: 'Coach Request Eligible Division?',
+    SYNC_STATUS: {
+        PENDING: 'pending',
+        SYNCED: 'synced',
+        FAILED: 'failed'
+    },
+    ANSWERS: {
+        YES: 'Yes',
+        NO: 'No'
+    }
+};
+
+const VALIDATION = {
+    MAX_DIVISION_LENGTH: 100,
+    MAX_INPUT_LENGTH: 200
+};
 
 // ---->  AIRTABLE AUTHENTICATION SETUP  <----
 let getToken;

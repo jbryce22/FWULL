@@ -1,6 +1,11 @@
 import { fetch } from "wix-fetch";
 import { getSecret } from "wix-secrets-backend";
-import { AIRTABLE } from './constants.js';
+
+// Inline constants for backend compatibility
+const AIRTABLE = {
+    BASE_ID_FINANCIAL_AID: 'appVWHysw4oYfn9Ox',
+    TABLE_FINANCIAL_AID: 'ULL Financial Aid Applications'
+};
 
 const BASE = AIRTABLE.BASE_ID_FINANCIAL_AID;
 const TABLE = AIRTABLE.TABLE_FINANCIAL_AID;
