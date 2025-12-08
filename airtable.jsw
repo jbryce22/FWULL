@@ -1,7 +1,7 @@
 // backend/airtable.jsw
 import { fetch } from 'wix-fetch';
 import wixData from 'wix-data';
-import { AIRTABLE, VALIDATION, COLLECTIONS } from 'public/constants.js';
+import { AIRTABLE, VALIDATION, COLLECTIONS } from './constants.js';
 
 // ---->  AIRTABLE AUTHENTICATION SETUP  <----
 let getToken;

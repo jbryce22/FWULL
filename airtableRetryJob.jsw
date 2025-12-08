@@ -2,7 +2,7 @@
 // Job to retry failed Airtable syncs for registrations
 import wixData from 'wix-data';
 import { syncRegistrationToAirtable } from 'backend/airtable';
-import { AIRTABLE, COLLECTIONS } from 'public/constants.js';
+import { AIRTABLE, COLLECTIONS } from './constants.js';
 
 /**
  * Retry syncing failed registrations to Airtable
