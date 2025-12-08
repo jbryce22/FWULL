@@ -103,8 +103,8 @@ $w.onReady(async () => {
                 player: reg.playerId,          // reference to UllPlayerList
                 playerFirstName: reg.playerFirstName,
                 playerLastName: reg.playerLastName,
-                playerName: reg.playerName,
-                seasonName: reg.seasonName,
+                // playerName: reg.playerName,     // Removed - only used for Wix display, not Airtable
+                // seasonName: reg.seasonName,     // Removed - season is handled via lookup
                 sport: reg.sport,
                 division: reg.division,
                 school: reg.school,
@@ -112,7 +112,7 @@ $w.onReady(async () => {
                 jerseySize: reg.jerseySize,
                 emergencyContactName: reg.emergencyContactName,
                 emergencyContactPhone: reg.emergencyContactPhone,
-                volunteerInterest: reg.volunteerInterest,
+                // volunteerInterest: reg.volunteerInterest,  // Removed - not mapped to Airtable
                 requestPlayDown: reg.requestPlayDown,
                 coachRequest: reg.coachRequest,
                 teamParentVolunteer: reg.teamParentVolunteer,
