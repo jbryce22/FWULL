@@ -1,6 +1,5 @@
 // backend/airtable.jsw
 import { fetch } from 'wix-fetch';
-import wixData from 'wix-data';
 
 // Import constants - inline for backend compatibility
 const COLLECTIONS = {
