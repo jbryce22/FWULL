@@ -154,7 +154,7 @@ export async function syncRegistrationToAirtable(regDoc) {
     let playerBirthDate = null;
     if (regDoc.player) {
         try {
-            const playerRecord = await wixData.get(COLLECTIONS.PLAYER_LIST, regDoc.player);
+            const playerRecord = await wixData.get(COLLECTIONS.PLAYER, regDoc.player);
             if (playerRecord?.playerBirthDate) {
                 // Convert to ISO format for Airtable
                 playerBirthDate = new Date(playerRecord.playerBirthDate).toISOString();
