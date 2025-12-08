@@ -154,118 +154,128 @@ export async function getDivisionNote(division) {
 // --- 2. REGISTRATION SYNC FUNCTION ---
 
 export async function syncRegistrationToAirtable(regDoc) {
-    console.log(`[Backend] ========== AIRTABLE SYNC START ==========`);
-    console.log(`[Backend] syncRegistrationToAirtable() called for Reg ID: ${regDoc?._id}`);
-    console.log(`[Backend] Target table: ${REG_SYNC_TABLE}`);
-
-    if (!regDoc?._id) {
-        console.error("[Backend] Invalid registration document received.");
-        throw new Error("Invalid registration document.");
-    }
-
-    console.log(`[Backend] Registration document validated. Player: ${regDoc.playerFirstName} ${regDoc.playerLastName}`);
-
-    let token;
     try {
-        token = await getToken?.();
-    } catch (err) {
-        console.error("[Backend] getToken threw:", err);
-        throw new Error("Token error");
+        console.log(`[Backend] ========== AIRTABLE SYNC START ==========`);
+        console.log(`[Backend] syncRegistrationToAirtable() called for Reg ID: ${regDoc?._id}`);
+        console.log(`[Backend] Target table: ${REG_SYNC_TABLE}`);
+
+        if (!regDoc?._id) {
+            console.error("[Backend] Invalid registration document received.");
+            throw new Error("[SYNC ERROR] Invalid registration document");
+        }
+
+        console.log(`[Backend] Registration document validated. Player: ${regDoc.playerFirstName} ${regDoc.playerLastName}`);
+
+        let token;
+        try {
+            token = await getToken?.();
+        } catch (err) {
+            console.error("[Backend] getToken threw:", err);
+            throw new Error("[SYNC ERROR] Token retrieval failed: " + (err.message || String(err)));
+        }
+
+        if (!token) {
+            console.error("[Backend] No Airtable token available.");
+            throw new Error("[SYNC ERROR] Missing Airtable token - check Wix Secrets configuration");
+        }
+
+        console.log("[Backend] Token retrieved successfully");
+
+        const url = `https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent(REG_SYNC_TABLE)}`;
+
+        // Prepare Single Select fields: AirTable Single Selects must match the option name exactly
+        const playDownValue = regDoc.requestPlayDown ? AIRTABLE.ANSWERS.YES : AIRTABLE.ANSWERS.NO;
+        // Assuming coachRequest holds a name or text. If it's a checkbox, adjust this.
+        const coachRequestValue = regDoc.coachRequest ?? '';
+
+        // ----- LOOKUP PLAYER BIRTH DATE FROM UllPlayerList -----
+        // TEMPORARILY DISABLED TO DEBUG
+        let playerBirthDate = null;
+        console.log('[Backend] Player birth date lookup temporarily disabled for debugging');
+        // if (regDoc.player) {
+        //     try {
+        //         const playerRecord = await wixData.get(COLLECTIONS.PLAYER, regDoc.player);
+        //         if (playerRecord?.playerBirthDate) {
+        //             // Convert to ISO format for Airtable
+        //             playerBirthDate = new Date(playerRecord.playerBirthDate).toISOString();
+        //             console.log(`[Backend] Found player birth date: ${playerBirthDate}`);
+        //         } else {
+        //             console.warn(`[Backend] Player record found but no birth date for player ID: ${regDoc.player}`);
+        //         }
+        //     } catch (err) {
+        //         console.error(`[Backend] Failed to lookup player birth date for player ID ${regDoc.player}:`, err);
+        //         // Don't fail the entire sync if birth date lookup fails - just log and continue
+        //     }
+        // } else {
+        //     console.warn('[Backend] No player ID in regDoc, cannot lookup birth date');
+        // }
+
+        // ----- MAPPED FIELDS USING AIRTABLE FIELD IDs (YOUR LIST) -----
+        const fields = {
+            // Date Fields
+            "fldqdFthduXPFvTeH": new Date(regDoc.datePaid || regDoc._updatedDate || new Date()).toISOString(), // Registration Date
+
+            // Player Info (Single Line Text)
+            "fldBQnKkcHQfFsRlE": regDoc.playerFirstName ?? '',  // Player First Name
+            "fldKOEUqF5QkTSbpu": regDoc.playerLastName ?? '',    // Player Last Name
+
+            // Single Select Fields
+            "fldQCpHIic6EZHwYT": regDoc.division ?? 'N/A',                       // Division
+            "fld0qO9VUfvrsiNrd": regDoc.sport ?? 'N/A',                          // Sport
+            "fldm3PJS7MzAB30bW": regDoc.jerseySize ?? '',                        // Jersey Size
+            "fldZBze7shCMpRSwB": regDoc.school ?? '',                            // School (dropdown value)
+            "fldjkJpZ8wDhP6MxI": playDownValue,                                  // Play Up/Down Request ('Yes' or 'No')
+
+            // Text Fields
+            "fldUmzITqG9hdKhwZ": regDoc.schoolOther ?? '',                       // School (Other) - text field for "Other/Not Listed"
+            "flddIm4AFISBemJ0i": coachRequestValue,                              // Coach Request (Daisy/Coach Pitch Softball)
+            "fldY0RFCRo9mBFveH": coachRequestValue,                              // Coach Request (Pee Wee Baseball) - same value
+
+            // Volunteer Fields
+            "fldcxSZcJ2c2tSBdx": regDoc.volunteerCoachName ?? regDoc.teamParentName ?? '',     // Volunteer First Name (prefer coach)
+            "flddKgsTmGrjvfvqm": '',                                             // Volunteer Last Name (not collected separately)
+            "fldWQJ9RX1m0Sjwjw": regDoc.volunteerCoachEmail ?? regDoc.teamParentEmail ?? '',   // Volunteer Email (prefer coach)
+            "fld8DRQSVJXknOznt": regDoc.coachVolunteerType ?? regDoc.teamParentVolunteer ?? '', // Volunteer Type
+
+            // Critical Fields
+            "fldMjkKEIeXzIAEs2": regDoc._id,                                     // Wix Reg ID (dedupe key)
+            "fld10em0hUD42rIFi": regDoc.fee ?? 0,                                // Amount Paid / Registration Fee
+            "fldOc4ZSrdnQ82585": playerBirthDate,                                // Player Birth Date (critical for age formulas)
+
+            // NOTE: Seasons linked record (fldoGnDq4O2wUVtj8) requires the Airtable record ID from Seasons table
+            // This would need to be looked up based on seasonName
+
+            // NOTE: Emergency Contact Name is collected but not mapped (marked as optional in Airtable)
+            // Add if needed: regDoc.emergencyContactName, regDoc.emergencyContactPhone
+        };
+
+        console.log("[Backend] Sending fields to Airtable:", fields);
+
+        const response = await fetch(url, {
+            method: 'post',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                records: [{ fields }]
+            })
+        });
+
+        if (!response.ok) {
+            const text = await response.text();
+            console.error("Airtable sync failed. Response:", text);
+            throw new Error(`[SYNC ERROR] Airtable API returned ${response.status}: ${text.substring(0, 200)}`);
+        }
+
+        const result = await response.json();
+        console.log("[Backend] Airtable synced OK. Result:", result);
+        return result;
+
+    } catch (error) {
+        // Re-throw with detailed error message that will be visible in frontend catch block
+        const errorMsg = error.message || String(error);
+        console.error("[Backend] SYNC FAILED:", errorMsg);
+        throw new Error(errorMsg.startsWith('[SYNC ERROR]') ? errorMsg : `[SYNC ERROR] ${errorMsg}`);
     }
-
-    if (!token) {
-        console.error("[Backend] No Airtable token available.");
-        throw new Error("Missing Airtable token");
-    }
-
-    const url = `https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent(REG_SYNC_TABLE)}`;
-
-    // Prepare Single Select fields: AirTable Single Selects must match the option name exactly
-    const playDownValue = regDoc.requestPlayDown ? AIRTABLE.ANSWERS.YES : AIRTABLE.ANSWERS.NO;
-    // Assuming coachRequest holds a name or text. If it's a checkbox, adjust this.
-    const coachRequestValue = regDoc.coachRequest ?? '';
-
-    // ----- LOOKUP PLAYER BIRTH DATE FROM UllPlayerList -----
-    // TEMPORARILY DISABLED TO DEBUG
-    let playerBirthDate = null;
-    console.log('[Backend] Player birth date lookup temporarily disabled for debugging');
-    // if (regDoc.player) {
-    //     try {
-    //         const playerRecord = await wixData.get(COLLECTIONS.PLAYER, regDoc.player);
-    //         if (playerRecord?.playerBirthDate) {
-    //             // Convert to ISO format for Airtable
-    //             playerBirthDate = new Date(playerRecord.playerBirthDate).toISOString();
-    //             console.log(`[Backend] Found player birth date: ${playerBirthDate}`);
-    //         } else {
-    //             console.warn(`[Backend] Player record found but no birth date for player ID: ${regDoc.player}`);
-    //         }
-    //     } catch (err) {
-    //         console.error(`[Backend] Failed to lookup player birth date for player ID ${regDoc.player}:`, err);
-    //         // Don't fail the entire sync if birth date lookup fails - just log and continue
-    //     }
-    // } else {
-    //     console.warn('[Backend] No player ID in regDoc, cannot lookup birth date');
-    // }
-
-    // ----- MAPPED FIELDS USING AIRTABLE FIELD IDs (YOUR LIST) -----
-    const fields = {
-        // Date Fields
-        "fldqdFthduXPFvTeH": new Date(regDoc.datePaid || regDoc._updatedDate || new Date()).toISOString(), // Registration Date
-
-        // Player Info (Single Line Text)
-        "fldBQnKkcHQfFsRlE": regDoc.playerFirstName ?? '',  // Player First Name
-        "fldKOEUqF5QkTSbpu": regDoc.playerLastName ?? '',    // Player Last Name
-
-        // Single Select Fields
-        "fldQCpHIic6EZHwYT": regDoc.division ?? 'N/A',                       // Division
-        "fld0qO9VUfvrsiNrd": regDoc.sport ?? 'N/A',                          // Sport
-        "fldm3PJS7MzAB30bW": regDoc.jerseySize ?? '',                        // Jersey Size
-        "fldZBze7shCMpRSwB": regDoc.school ?? '',                            // School (dropdown value)
-        "fldjkJpZ8wDhP6MxI": playDownValue,                                  // Play Up/Down Request ('Yes' or 'No')
-
-        // Text Fields
-        "fldUmzITqG9hdKhwZ": regDoc.schoolOther ?? '',                       // School (Other) - text field for "Other/Not Listed"
-        "flddIm4AFISBemJ0i": coachRequestValue,                              // Coach Request (Daisy/Coach Pitch Softball)
-        "fldY0RFCRo9mBFveH": coachRequestValue,                              // Coach Request (Pee Wee Baseball) - same value
-
-        // Volunteer Fields
-        "fldcxSZcJ2c2tSBdx": regDoc.volunteerCoachName ?? regDoc.teamParentName ?? '',     // Volunteer First Name (prefer coach)
-        "flddKgsTmGrjvfvqm": '',                                             // Volunteer Last Name (not collected separately)
-        "fldWQJ9RX1m0Sjwjw": regDoc.volunteerCoachEmail ?? regDoc.teamParentEmail ?? '',   // Volunteer Email (prefer coach)
-        "fld8DRQSVJXknOznt": regDoc.coachVolunteerType ?? regDoc.teamParentVolunteer ?? '', // Volunteer Type
-
-        // Critical Fields
-        "fldMjkKEIeXzIAEs2": regDoc._id,                                     // Wix Reg ID (dedupe key)
-        "fld10em0hUD42rIFi": regDoc.fee ?? 0,                                // Amount Paid / Registration Fee
-        "fldOc4ZSrdnQ82585": playerBirthDate,                                // Player Birth Date (critical for age formulas)
-
-        // NOTE: Seasons linked record (fldoGnDq4O2wUVtj8) requires the Airtable record ID from Seasons table
-        // This would need to be looked up based on seasonName
-
-        // NOTE: Emergency Contact Name is collected but not mapped (marked as optional in Airtable)
-        // Add if needed: regDoc.emergencyContactName, regDoc.emergencyContactPhone
-    };
-
-    console.log("[Backend] Sending fields to Airtable:", fields);
-
-    const response = await fetch(url, {
-        method: 'post',
-        headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            records: [{ fields }]
-        })
-    });
-
-    if (!response.ok) {
-        const text = await response.text();
-        console.error("Airtable sync failed. Response:", text);
-        throw new Error(`Airtable sync failed: ${text}`);
-    }
-
-    const result = await response.json();
-    console.log("[Backend] Airtable synced OK. Result:", result);
-    return result;
 }
