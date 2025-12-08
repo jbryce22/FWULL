@@ -108,6 +108,7 @@ $w.onReady(async () => {
                 sport: reg.sport,
                 division: reg.division,
                 school: reg.school,
+                schoolOther: reg.schoolOther,  // For Airtable "School (Other)" field
                 jerseySize: reg.jerseySize,
                 emergencyContactName: reg.emergencyContactName,
                 emergencyContactPhone: reg.emergencyContactPhone,

@@ -155,12 +155,16 @@ export async function getDivisionNote(division) {
 // --- 2. REGISTRATION SYNC FUNCTION ---
 
 export async function syncRegistrationToAirtable(regDoc) {
-    console.log(`[Backend] syncRegistrationToAirtable() for Reg ID: ${regDoc?._id} to table ${REG_SYNC_TABLE}`);
+    console.log(`[Backend] ========== AIRTABLE SYNC START ==========`);
+    console.log(`[Backend] syncRegistrationToAirtable() called for Reg ID: ${regDoc?._id}`);
+    console.log(`[Backend] Target table: ${REG_SYNC_TABLE}`);
 
     if (!regDoc?._id) {
         console.error("[Backend] Invalid registration document received.");
         throw new Error("Invalid registration document.");
     }
+
+    console.log(`[Backend] Registration document validated. Player: ${regDoc.playerFirstName} ${regDoc.playerLastName}`);
 
     let token;
     try {
@@ -183,24 +187,26 @@ export async function syncRegistrationToAirtable(regDoc) {
     const coachRequestValue = regDoc.coachRequest ?? '';
 
     // ----- LOOKUP PLAYER BIRTH DATE FROM UllPlayerList -----
+    // TEMPORARILY DISABLED TO DEBUG
     let playerBirthDate = null;
-    if (regDoc.player) {
-        try {
-            const playerRecord = await wixData.get(COLLECTIONS.PLAYER, regDoc.player);
-            if (playerRecord?.playerBirthDate) {
-                // Convert to ISO format for Airtable
-                playerBirthDate = new Date(playerRecord.playerBirthDate).toISOString();
-                console.log(`[Backend] Found player birth date: ${playerBirthDate}`);
-            } else {
-                console.warn(`[Backend] Player record found but no birth date for player ID: ${regDoc.player}`);
-            }
-        } catch (err) {
-            console.error(`[Backend] Failed to lookup player birth date for player ID ${regDoc.player}:`, err);
-            // Don't fail the entire sync if birth date lookup fails - just log and continue
-        }
-    } else {
-        console.warn('[Backend] No player ID in regDoc, cannot lookup birth date');
-    }
+    console.log('[Backend] Player birth date lookup temporarily disabled for debugging');
+    // if (regDoc.player) {
+    //     try {
+    //         const playerRecord = await wixData.get(COLLECTIONS.PLAYER, regDoc.player);
+    //         if (playerRecord?.playerBirthDate) {
+    //             // Convert to ISO format for Airtable
+    //             playerBirthDate = new Date(playerRecord.playerBirthDate).toISOString();
+    //             console.log(`[Backend] Found player birth date: ${playerBirthDate}`);
+    //         } else {
+    //             console.warn(`[Backend] Player record found but no birth date for player ID: ${regDoc.player}`);
+    //         }
+    //     } catch (err) {
+    //         console.error(`[Backend] Failed to lookup player birth date for player ID ${regDoc.player}:`, err);
+    //         // Don't fail the entire sync if birth date lookup fails - just log and continue
+    //     }
+    // } else {
+    //     console.warn('[Backend] No player ID in regDoc, cannot lookup birth date');
+    // }
 
     // ----- MAPPED FIELDS USING AIRTABLE FIELD IDs (YOUR LIST) -----
     const fields = {
