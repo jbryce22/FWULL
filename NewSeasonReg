@@ -2,7 +2,7 @@
 import wixData from 'wix-data';
 import wixUsers from 'wix-users';
 import wixLocation from 'wix-location';
-import { getDivisionNote, syncRegistrationToAirtable } from 'backend/airtable.jsw';
+import { getDivisionNote } from 'backend/airtable.jsw';
 import { getCurrentUserProfile } from 'backend/userProfile.jsw';
 import { session } from 'wix-storage';
 import { clearCurrentCart } from 'backend/cartManager';
@@ -260,13 +260,30 @@ async function updateVolunteerFields() {
     });
 
     // Show/hide additional volunteer fields when either volunteer option is selected
-    ["#inputVolOtherLL", "#volunteerCoachPriorHistory", "#dropdownVolCrimesMinors",
-     "#dropdownVolPriorCrime", "#dropdownVolPending", "#dropdownVolCriminalCharges",
-     "#checkboxVolPrivacyPolicy", "#checkboxChildProtectionProgram", "#checkboxVolunteerApp"].forEach(id => {
-        const el = $w(id);
-        if (anyVolunteer) { safeExpand(id); }
-        else { safeCollapse(id); el.value = ""; }
+    [
+        '#inputVolOtherLL',
+        '#volunteerCoachPriorHistory',
+        '#dropdownVolCrimesMinors',
+        '#dropdownVolPriorCrime',
+        '#dropdownVolPending',
+        '#dropdownVolCriminalCharges',
+        '#checkboxVolPrivacyPolicy',
+        '#checkboxChildProtectionProgram',
+        '#checkboxVolunteerApp'
+    ].forEach(id => {
+        const el = getElement(id);
+        if (!el) return;
+
+        if (anyVolunteer) {
+            safeExpand(id);
+        } else {
+            safeCollapse(id);
+            if ('value' in el) el.value = '';
+            if ('checked' in el) el.checked = false;
+            if ('required' in el) el.required = false;
+        }
     });
+
     // Extra coach volunteer legal/screening fields
     toggleCoachVolunteerExtraFields(coachYes ? 'yes' : 'no');
 
@@ -511,8 +528,6 @@ const calculateDivision = async () => {
 // =====================================================================
 
 $w.onReady(async () => {
-    const errorText = getElement('#textError');
-
     if (!wixUsers.currentUser.loggedIn) {
         safeShow('#textError', 'Please log in to register.');
         return;
@@ -718,7 +733,7 @@ async function handleRegisterClick() {
             playerName: `${player.firstName} ${player.lastName}`,
             seasonName: season,
             sport: sport,
-            division: division,
+            division: division, // full string, e.g. "Baseball Majors - 2026.1"
             school: school,
             schoolOther: schoolOther,
             jerseySize: jerseyDrop?.value || '',
@@ -771,34 +786,7 @@ async function handleRegisterClick() {
         }
 
         // ----------------------------------------------------------------
-        // 1) IMMEDIATE AIRTABLE SYNC (no need to complete checkout first)
-        // ----------------------------------------------------------------
-        const airtablePayload = {
-            _id: `TEMP-${Date.now()}`, // used as Wix Reg ID in Airtable
-            ...registrationItem,
-            fee,
-            datePaid: new Date().toISOString()
-        };
-
-        console.log('[Airtable Sync] Sending registration to Airtable:', airtablePayload);
-
-        try {
-            const airtableRes = await syncRegistrationToAirtable(airtablePayload);
-
-            if (airtableRes?.success) {
-                safeShow(successTextId, 'Registration submitted successfully!');
-                console.log('[Airtable Sync] Success:', airtableRes);
-            } else {
-                console.error('[Airtable Sync] FAILED:', airtableRes);
-                safeShow(errorTextId, 'Registration saved, but Airtable sync may have failed.');
-            }
-        } catch (err) {
-            console.error('[Airtable Sync ERROR]:', err);
-            safeShow(errorTextId, 'An unexpected error occurred syncing to Airtable.');
-        }
-
-        // ----------------------------------------------------------------
-        // 2) Keep existing checkout flow (fee in cart, regQueue, redirect)
+        // Keep existing checkout flow (fee in cart, regQueue, redirect)
         // ----------------------------------------------------------------
         let regQueue = [];
         try {
