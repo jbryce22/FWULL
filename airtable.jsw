@@ -63,15 +63,15 @@ const FIELD_MAP = {
     coachVolunteer: "fldjajn2crJQuunu0",
     coachVolunteerType: "fld8DRQSVJXknOznt",
     volunteerCoachNumber: "fldc8HsWuUm60LgLu",
-    inputVolOtherLL: "fldh2DVeqG7QWRp3x"
-    volunteerCoachPriorHistory:"fldpgCiv31IAKmYGE"
-    dropdownVolCrimesMinors:"fldFSDzrTnAWq6v72"
-    dropdownVolPriorCrime:"fldWeAc5DJNJ53BTL"
-    dropdownVolPending:"fldOlfCSkzjZExGXO"
-    dropdownVolCriminalCharges:"fldOlfCSkzjZExGXO"
-    checkboxVolPrivacyPolicy:"fldW2slKrJZQoSnV7"
-    checkboxChildProtectionProgram:"fldjPiNHYYPoL8qw4"
-    checkboxVolunteerApp:"fldvxJ0viQFGayuIV"
+    inputVolOtherLL: "fldh2DVeqG7QWRp3x",
+    volunteerCoachPriorHistory:"fldpgCiv31IAKmYGE",
+    dropdownVolCrimesMinors:"fldFSDzrTnAWq6v72",
+    dropdownVolPriorCrime:"fldWeAc5DJNJ53BTL",
+    dropdownVolPending:"fldOlfCSkzjZExGXO",
+    dropdownVolCriminalCharges:"fldOlfCSkzjZExGXO",
+    checkboxVolPrivacyPolicy:"fldW2slKrJZQoSnV7",
+    checkboxChildProtectionProgram:"fldjPiNHYYPoL8qw4",
+    checkboxVolunteerApp:"fldvxJ0viQFGayuIV",
 
     // Fee
     fee: "fld10em0hUD42rIFi"
