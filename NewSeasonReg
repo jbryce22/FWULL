@@ -185,6 +185,11 @@ function handleSchoolOther() {
     button.disabled = !isFormValid();
 }
 
+// ===== VOLUNTEER FIELDS VISIBILITY =====
+function updateVolunteerFields() {
+    const teamParent = ($w("#teamParent").value || "").includes("Yes");
+    const coach = ($w("#coachVolunteer").value || "").includes("Yes");
+    const anyVolunteer = teamParent || coach;
 // =====================================================================
 // VOLUNTEER FIELDS VISIBILITY + AUTOFILL
 // =====================================================================
@@ -258,6 +263,14 @@ async function updateVolunteerFields() {
         }
     });
 
+    // Show/hide additional volunteer fields when either volunteer option is selected
+    ["#inputVolOtherLL", "#volunteerCoachPriorHistory", "#dropdownVolCrimesMinors",
+     "#dropdownVolPriorCrime", "#dropdownVolPending", "#dropdownVolCriminalCharges",
+     "#checkboxVolPrivacyPolicy", "#checkboxChildProtectionProgram", "#checkboxVolunteerApp"].forEach(id => {
+        const el = $w(id);
+        if (anyVolunteer) { safeExpand(id); }
+        else { safeCollapse(id); el.value = ""; }
+    });
     // Extra coach volunteer legal/screening fields
     toggleCoachVolunteerExtraFields(coachYes ? 'yes' : 'no');
 
@@ -645,6 +658,69 @@ async function handleRegisterClick() {
             return;
         }
 
+    const player = playerDataMap[selectedPlayerId];
+    const sport = $w("#dropdownSport").value;
+    const season = $w("#dropdownSeason").value;
+
+    const divText = $w("#textDivision").text;
+    const division = divText.split("→")[1]?.trim() || "Unknown";
+
+    // Capture school dropdown value AND "other" text separately for Airtable
+    const schoolDropdown = $w("#inputSchool").value;
+    const schoolOther = schoolDropdown === FORM_OPTIONS.SCHOOL_OTHER
+        ? $w("#inputSchoolother").value
+        : "";
+    const school = schoolDropdown === FORM_OPTIONS.SCHOOL_OTHER
+        ? $w("#inputSchoolother").value
+        : schoolDropdown;
+
+    const registrationItem = {
+        playerId: selectedPlayerId,                 // for reference field "player"
+        parentId: wixUsers.currentUser.id,          // for reference field "parent"
+        playerFirstName: player.firstName,
+        playerLastName: player.lastName,
+        playerName: `${player.firstName} ${player.lastName}`,
+        seasonName: season,
+        sport: sport,
+        division: division,
+        school: school,                             // For Wix DB and display
+        schoolOther: schoolOther,                   // For Airtable "School (Other)" field
+        jerseySize: $w("#dropdownJerseySize").value,
+        emergencyContactName: $w("#inputEmergencyName").value,
+        emergencyContactPhone: $w("#inputEmergencyPhone").value,
+        inputAdditionalEmail: $w("#inputAdditionalEmail").value || "",
+        volunteerInterest: $w("#checkboxVolunteer")?.checked || false,
+        requestPlayDown: $w("#PlayDown").value || "",
+        coachRequest: $w("#coachRequest").value || "",
+        teamParentVolunteer: $w("#teamParent").value || "",
+        teamParentName: $w("#inputParentVolunteerName").value || "",
+        teamParentEmail: $w("#inputParentVolunteerEmail").value || "",
+        teamParentPhone: $w("#inputParentVolunteerPhone").value || "",
+        coachVolunteer: $w("#coachVolunteer").value || "",
+        coachVolunteerType: $w("#coachVolunteerType").value || "",
+        volunteerCoachName: $w("#volunteerCoachName").value || "",
+        volunteerCoachEmail: $w("#volunteerCoachEmail").value || "",
+        volunteerCoachNumber: $w("#volunteerCoachNumber").value || "",
+        // Additional volunteer fields
+        inputVolOtherLL: $w("#inputVolOtherLL").value || "",
+        volunteerCoachPriorHistory: $w("#volunteerCoachPriorHistory").value || "",
+        dropdownVolCrimesMinors: $w("#dropdownVolCrimesMinors").value || "",
+        dropdownVolPriorCrime: $w("#dropdownVolPriorCrime").value || "",
+        dropdownVolPending: $w("#dropdownVolPending").value || "",
+        dropdownVolCriminalCharges: $w("#dropdownVolCriminalCharges").value || "",
+        checkboxVolPrivacyPolicy: $w("#checkboxVolPrivacyPolicy")?.checked || false,
+        checkboxChildProtectionProgram: $w("#checkboxChildProtectionProgram")?.checked || false,
+        checkboxVolunteerApp: $w("#checkboxVolunteerApp")?.checked || false
+    };
+
+    // Fee from Airtable
+    let fee = 0;
+    try {
+        const noteRes = await getDivisionNote(division);
+        if (noteRes.success) fee = noteRes.fee || 0;
+    } catch (e) {
+        console.error("[Register] Failed to fetch division fee:", e);
+    }
         const player = playerDataMap[selectedPlayerId];
         const sportDrop = getElement('#dropdownSport');
         const seasonDrop = getElement('#dropdownSeason');
