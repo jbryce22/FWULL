@@ -808,9 +808,11 @@ async function handleRegisterClick() {
             regQueue = [];
         }
 
-        regQueue.push({ ...registrationItem, fee });
+        const itemToQueue = { ...registrationItem, fee };
+        regQueue.push(itemToQueue);
         session.setItem('regQueue', JSON.stringify(regQueue));
-        console.log('Queue updated:', regQueue);
+        console.log('[DEBUG] Registration item being saved to queue:', itemToQueue);
+        console.log('[DEBUG] Full regQueue after save:', regQueue);
 
         safeShow(successTextId, 'Success! Taking you to payment...');
         const checkoutUrl = `${ROUTES.CHECKOUT}?player=${encodeURIComponent(
