@@ -1,149 +1,82 @@
-// Velo API Reference: https://www.wix.com/velo/reference/api-overview/introduction
-
-//$w.onReady(function () {
-
-	// Write your Javascript code here using the Velo framework API
-
-	// Print hello world:
-	// console.log("Hello world!");
-
-	// Call functions on page elements, e.g.:
-	// $w("#button1").label = "Click me!";
-
-	// Click "Run", or Preview your site, to execute your code
-
-//});
-
-// FILE: Stores Thank You Page code
+// FILE: Thank You Page – FINAL CLEAN VERSION
 import { session } from 'wix-storage';
 import wixData from 'wix-data';
-import { syncRegistrationToAirtable } from 'backend/airtable';
+import { syncRegistrationToAirtable } from 'backend/airtable.jsw';
 import { AIRTABLE } from 'public/constants.js';
 
 $w.onReady(async () => {
     try {
-        const thankYouEl = $w('#thankYouPage1');
-        if (!thankYouEl || !thankYouEl.getOrder) {
-            console.error("Thank You Page element #thankYouPage1 not found or missing getOrder().");
+        const thankYou = $w('#thankYouPage1');
+        if (!thankYou || !thankYou.getOrder) {
+            console.error("Thank You Page element #thankYouPage1 missing.");
             return;
         }
 
-        const order = await thankYouEl.getOrder();
-        if (!order) {
-            console.warn("No order returned from Thank You Page.");
-            return;
-        }
+        // -----------------------------
+        // LOAD ORDER DETAILS
+        // -----------------------------
+        const order = await thankYou.getOrder();
+        if (!order) return;
 
         const orderId = order._id;
         const lineItems = order.lineItems || [];
         console.log("Order:", orderId, lineItems);
 
-        // Pull pending registrations from session
-        const stored = session.getItem("regQueue");
-        if (!stored) {
-            console.warn("No regQueue in session.");
-            return;
-        }
-
-        let regQueue;
+        // -----------------------------
+        // LOAD regQueue FROM SESSION
+        // -----------------------------
+        let regQueue = [];
         try {
-            regQueue = JSON.parse(stored);
-        } catch (e) {
-            console.error("Failed to parse regQueue:", e);
+            regQueue = JSON.parse(session.getItem("regQueue") || "[]");
+        } catch (err) {
+            console.warn("regQueue parse error:", err);
+            regQueue = [];
+        }
+
+        if (!regQueue.length) {
+            console.warn("No registration queue found.");
             return;
         }
 
-        if (!Array.isArray(regQueue) || regQueue.length === 0) {
-            console.warn("regQueue is empty.");
-            return;
-        }
-
-        // Create "slots" from line items (handles quantity > 1)
+        // -----------------------------
+        // BUILD MATCHABLE PRODUCT SLOTS
+        // -----------------------------
         const slots = [];
-        lineItems.forEach(li => {
+        for (const li of lineItems) {
             const qty = li.quantity || 1;
             for (let i = 0; i < qty; i++) {
-                slots.push({ lineItem: li, used: false });
+                slots.push({ li, used: false });
             }
-        });
+        }
 
+        // -----------------------------
+        // MATCH QUEUED REGISTRATIONS → ORDER LINE ITEMS
+        // -----------------------------
         const matched = [];
-
-        // For each registration, find a matching line item by division text
         for (const reg of regQueue) {
             const idx = slots.findIndex(s =>
                 !s.used &&
-                typeof s.lineItem.name === "string" &&
-                s.lineItem.name.includes(reg.division)
+                typeof s.li.name === "string" &&
+                s.li.name.includes(reg.division) // <-- The matching rule
             );
 
             if (idx !== -1) {
                 slots[idx].used = true;
-                matched.push({ reg, lineItem: slots[idx].lineItem });
+                matched.push({ reg, lineItem: slots[idx].li });
             }
         }
 
-        if (matched.length === 0) {
-            console.warn("No registrations matched to order line items.");
+        if (!matched.length) {
+            console.warn("No matched registrations.");
             return;
         }
 
         console.log("Matched registrations:", matched);
 
-        // Insert each matched registration into SeasonRegistration
-        const summaryLines = [];
-
+        // =============================
+        // PROCESS EACH MATCHED REG
+        // =============================
         for (const { reg, lineItem } of matched) {
-            console.log('[DEBUG] Processing registration from queue:', reg);
-            const price =
-                (typeof lineItem.totalPrice === "number" ? lineItem.totalPrice : null) ??
-                ((lineItem.price || 0) * (lineItem.quantity || 1));
-
-            const itemToInsert = {
-                parent: reg.parentId,          // reference to PrivateMembersData
-                player: reg.playerId,          // reference to UllPlayerList
-                playerId: reg.playerId,        // text field - player ID as string
-                parentId: reg.parentId,        // text field - parent ID as string
-                playerFirstName: reg.playerFirstName,
-                playerLastName: reg.playerLastName,
-                playerName: reg.playerName,
-                seasonName: reg.seasonName,
-                sport: reg.sport,
-                division: reg.division,
-                school: reg.school,
-                schoolOther: reg.schoolOther,
-                jerseySize: reg.jerseySize,
-                emergencyContactName: reg.emergencyContactName,
-                emergencyContactPhone: reg.emergencyContactPhone,
-                inputAdditionalEmail: reg.inputAdditionalEmail,
-                volunteerInterest: reg.volunteerInterest,
-                requestPlayDown: reg.requestPlayDown,
-                coachRequest: reg.coachRequest,
-                teamParentVolunteer: reg.teamParentVolunteer,
-                teamParentName: reg.teamParentName,
-                teamParentEmail: reg.teamParentEmail,
-                teamParentPhone: reg.teamParentPhone,
-                coachVolunteer: reg.coachVolunteer,
-                coachVolunteerType: reg.coachVolunteerType,
-                volunteerCoachName: reg.volunteerCoachName,
-                volunteerCoachEmail: reg.volunteerCoachEmail,
-                volunteerCoachNumber: reg.volunteerCoachNumber,
-                // Additional volunteer fields (must be added to CMS first)
-                inputVolOtherLL: reg.inputVolOtherLL,
-                volunteerCoachPriorHistory: reg.volunteerCoachPriorHistory,
-                dropdownVolCrimesMinors: reg.dropdownVolCrimesMinors,
-                dropdownVolPriorCrime: reg.dropdownVolPriorCrime,
-                dropdownVolPending: reg.dropdownVolPending,
-                dropdownVolCriminalCharges: reg.dropdownVolCriminalCharges,
-                checkboxVolPrivacyPolicy: reg.checkboxVolPrivacyPolicy,
-                checkboxChildProtectionProgram: reg.checkboxChildProtectionProgram,
-                checkboxVolunteerApp: reg.checkboxVolunteerApp,
-
-                fee: price,
-                paid: true,
-                orderId: orderId,
-                datePaid: new Date()
-            };
 
             // Insert to database with initial sync status
             const itemWithSyncStatus = {
@@ -238,25 +171,125 @@ $w.onReady(async () => {
                 // Admin can retry failed syncs later via backend job
             }
 
-            summaryLines.push(`${reg.playerName} – ${reg.division}`);
+            const paidAmount = lineItem.totalPrice ??
+                ((lineItem.price || 0) * (lineItem.quantity || 1));
+
+            // -----------------------------
+            // BUILD CMS ITEM
+            // -----------------------------
+            const cmsItem = {
+                parent: reg.parentId,
+                player: reg.playerId,
+
+                playerId: reg.playerId,
+                parentId: reg.parentId,
+              //  playerFirstName: reg.playerFirstName,
+              //  playerLastName: reg.playerLastName,
+              //  playerName: reg.playerName,
+
+              //  sport: reg.sport,
+            //    division: reg.division,
+               // seasonName: reg.seasonName,
+              //  jerseySize: reg.jerseySize,
+
+             //   school: reg.school,
+             //   schoolOther: reg.schoolOther,
+
+             //   emergencyContactName: reg.emergencyContactName,
+             //  emergencyContactPhone: reg.emergencyContactPhone,
+
+              //  inputAdditionalEmail: reg.additionalEmail || "",
+              //  requestPlayDown: reg.requestPlayDown || "",
+              //  coachRequest: reg.coachRequest || "",
+
+              //  teamParentVolunteer: reg.teamParentVolunteer,
+               // teamParentName: reg.teamParentName,
+              //  teamParentEmail: reg.teamParentEmail,
+               // teamParentPhone: reg.teamParentPhone,
+
+               // coachVolunteer: reg.coachVolunteer,
+               // coachVolunteerType: reg.coachVolunteerType,
+               // volunteerCoachName: reg.volunteerCoachName,
+               // volunteerCoachEmail: reg.volunteerCoachEmail,
+               // volunteerCoachNumber: reg.volunteerCoachNumber,
+
+                // Additional volunteer fields only if provided
+              //  inputVolOtherLL: reg.inputVolOtherLL || "",
+              // volunteerCoachPriorHistory: reg.volunteerCoachPriorHistory || "",
+              //  dropdownVolCrimesMinors: reg.dropdownVolCrimesMinors || "",
+              //  dropdownVolPriorCrime: reg.dropdownVolPriorCrime || "",
+              //  dropdownVolPending: reg.dropdownVolPending || "",
+
+              //  checkboxVolPrivacyPolicy: !!reg.checkboxVolPrivacyPolicy,
+              //  checkboxChildProtectionProgram: !!reg.checkboxChildProtectionProgram,
+              //  checkboxVolunteerApp: !!reg.checkboxVolunteerApp,
+
+               // fee: paidAmount,
+               // paid: true,
+               // orderId,
+             //   datePaid: new Date(),
+
+              //  airtableSyncStatus: AIRTABLE.SYNC_STATUS.PENDING,
+              //  airtableSyncAttempts: 0
+            };
+
+            // -----------------------------
+            // INSERT INTO CMS
+            // -----------------------------
+            const inserted = await wixData.insert("SeasonRegistration", cmsItem);
+            console.log("Inserted SeasonRegistration:", inserted._id);
+
+            // -----------------------------
+            // SYNC TO AIRTABLE
+            // -----------------------------
+           // try {
+           //     const airtablePayload = {
+            //        ...reg,
+            //        _id: inserted._id,
+            //        fee: paidAmount,
+             //       datePaid: inserted.datePaid,
+             //       playerBirthDate: reg.playerBirthDate
+              //  };
+
+             //   const result = await syncRegistrationToAirtable(airtablePayload);
+
+             //   if (result?.success) {
+              //      await wixData.update("SeasonRegistration", {
+              //          _id: inserted._id,
+              //         airtableSyncStatus: AIRTABLE.SYNC_STATUS.SYNCED,
+               //         airtableSyncedAt: new Date()
+               //     });
+               // } else {
+               //     throw new Error(result?.error || "Unknown Airtable error");
+              // }
+
+            //} catch (err) {
+               // console.error("Airtable sync error:", err);
+
+               // await wixData.update("SeasonRegistration", {
+               //     _id: inserted._id,
+               //     airtableSyncStatus: AIRTABLE.SYNC_STATUS.FAILED,
+               //     airtableSyncError: err.message || String(err),
+               //     airtableSyncAttempts: 1,
+               //     lastSyncAttempt: new Date()
+              //  });
+            //}
         }
 
-        // Show summary on Thank You page
-        if ($w("#textRegistrationSummary")) {
-            $w("#textRegistrationSummary").text = summaryLines.join("\n");
-            $w("#textRegistrationSummary").show();
-        }
-
-        // Optional: clear only matched entries from session
-        const remaining = regQueue.filter(r =>
-            !matched.some(m => m.reg.playerId === r.playerId &&
-                               m.reg.seasonName === r.seasonName &&
-                               m.reg.sport === r.sport)
+        // -----------------------------
+        // REMOVE ONLY PROCESSED ITEMS
+        // -----------------------------
+        const remaining = regQueue.filter(
+            r => !matched.some(m =>
+                m.reg.playerId === r.playerId &&
+                m.reg.seasonName === r.seasonName &&
+                m.reg.sport === r.sport
+            )
         );
+
         session.setItem("regQueue", JSON.stringify(remaining));
-        console.log("Remaining regQueue after processing:", remaining);
 
     } catch (err) {
-        console.error("Error on Thank You page:", err);
+        console.error("Error on Thank You Page:", err);
     }
 });
