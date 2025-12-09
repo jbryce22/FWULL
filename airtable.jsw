@@ -25,6 +25,8 @@ const FIELD_MAP = {
     // NEW text fields
     playerId: "fldr39kcczMXYVQ71",
     parentId: "fldAzIKtVXcvaXpVr",
+     additionalemail: "fld71iEEn5syQvE9M",
+     
 
     // School fields
     school: "fldZBze7shCMpRSwB",         // text
@@ -34,6 +36,8 @@ const FIELD_MAP = {
     teamParentName: "fldANKootbkyScMwO",
     teamParentEmail: "fldTkz5xytmx4qwO9",
     teamParentPhone: "fldIrdaAv42E4xCQD",
+   
+    
 
     // Sports & division
     sport: "fld0qO9VUfvrsiNrd",
@@ -59,6 +63,15 @@ const FIELD_MAP = {
     coachVolunteer: "fldjajn2crJQuunu0",
     coachVolunteerType: "fld8DRQSVJXknOznt",
     volunteerCoachNumber: "fldc8HsWuUm60LgLu",
+    inputVolOtherLL: "fldh2DVeqG7QWRp3x"
+    volunteerCoachPriorHistory:"fldpgCiv31IAKmYGE"
+    dropdownVolCrimesMinors:"fldFSDzrTnAWq6v72"
+    dropdownVolPriorCrime:"fldWeAc5DJNJ53BTL"
+    dropdownVolPending:"fldOlfCSkzjZExGXO"
+    dropdownVolCriminalCharges:"fldOlfCSkzjZExGXO"
+    checkboxVolPrivacyPolicy:"fldW2slKrJZQoSnV7"
+    checkboxChildProtectionProgram:"fldjPiNHYYPoL8qw4"
+    checkboxVolunteerApp:"fldvxJ0viQFGayuIV"
 
     // Fee
     fee: "fld10em0hUD42rIFi"
@@ -75,7 +88,17 @@ const SINGLE_SELECT_FIELDS = new Set([
     "fldMfAXEBw2ZxdNDt", // teamParentVolunteer
     "fldjajn2crJQuunu0", // coachVolunteer
     "fld8DRQSVJXknOznt", // coachVolunteerType
-    "fldc8HsWuUm60LgLu"  // volunteerCoachNumber
+    "fldc8HsWuUm60LgLu",  // volunteerCoachNumber
+    "fldOlfCSkzjZExGXO", //
+    "fldpgCiv31IAKmYGE",
+    "fldFSDzrTnAWq6v72",
+    "fldWeAc5DJNJ53BTL",
+    "fldOlfCSkzjZExGXO"
+
+
+
+
+
 ]);
 
 /* -------------------------------------------------------------------
