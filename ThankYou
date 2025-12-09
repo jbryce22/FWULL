@@ -78,12 +78,97 @@ $w.onReady(async () => {
         // =============================
         for (const { reg, lineItem } of matched) {
 
-            // -----------------------------
-            // VALIDATE REQUIRED FIELDS
-            // -----------------------------
-            if (!reg.playerId || !reg.seasonName || !reg.sport) {
-                console.error("Skipping invalid registration:", reg);
-                continue;
+            // Insert to database with initial sync status
+            const itemWithSyncStatus = {
+                ...itemToInsert,
+                airtableSyncStatus: AIRTABLE.SYNC_STATUS.PENDING,
+                airtableSyncAttempts: 0
+            };
+            console.log('[DEBUG] About to insert into CMS:', itemWithSyncStatus);
+            const created = await wixData.insert("SeasonRegistration", itemWithSyncStatus);
+            console.log('[DEBUG] Inserted SeasonRegistration record:', created);
+            console.log("Inserted SeasonRegistration:", created._id);
+
+            // Diagnostic: Check which fields were dropped by Wix
+            const sentFields = Object.keys(itemWithSyncStatus);
+            const receivedFields = Object.keys(created);
+            const droppedFields = sentFields.filter(f => !receivedFields.includes(f) && !f.startsWith('_'));
+            if (droppedFields.length > 0) {
+                console.error('🚨 MISSING CMS FIELDS - These fields were sent but not saved:', droppedFields);
+                console.error('👉 Add these fields to your SeasonRegistration CMS collection!');
+            }
+
+            // Sync to Airtable with error handling and status tracking
+            try {
+                // Create clean object for Airtable - exclude Wix system fields and internal tracking fields
+                const cleanedForAirtable = {
+                    _id: created._id,
+                    playerId: created.player,
+                    playerBirthDate: reg.playerBirthDate,
+                    parentId: created.parent,
+                    playerFirstName: created.playerFirstName,
+                    playerLastName: created.playerLastName,
+                    sport: created.sport,
+                    division: created.division,
+                    school: created.school,
+                    schoolOther: created.schoolOther,
+                    jerseySize: created.jerseySize,
+                    emergencyContactName: created.emergencyContactName,
+                    emergencyContactPhone: created.emergencyContactPhone,
+                    inputAdditionalEmail: created.inputAdditionalEmail,
+                    requestPlayDown: created.requestPlayDown,
+                    coachRequest: created.coachRequest,
+                    teamParentVolunteer: created.teamParentVolunteer,
+                    teamParentName: created.teamParentName,
+                    teamParentEmail: created.teamParentEmail,
+                    teamParentPhone: created.teamParentPhone,
+                    coachVolunteer: created.coachVolunteer,
+                    coachVolunteerType: created.coachVolunteerType,
+                    volunteerCoachName: created.volunteerCoachName,
+                    volunteerCoachEmail: created.volunteerCoachEmail,
+                    volunteerCoachNumber: created.volunteerCoachNumber,
+                    // Additional volunteer fields
+                    inputVolOtherLL: created.inputVolOtherLL,
+                    volunteerCoachPriorHistory: created.volunteerCoachPriorHistory,
+                    dropdownVolCrimesMinors: created.dropdownVolCrimesMinors,
+                    dropdownVolPriorCrime: created.dropdownVolPriorCrime,
+                    dropdownVolPending: created.dropdownVolPending,
+                    dropdownVolCriminalCharges: created.dropdownVolCriminalCharges,
+                    checkboxVolPrivacyPolicy: created.checkboxVolPrivacyPolicy,
+                    checkboxChildProtectionProgram: created.checkboxChildProtectionProgram,
+                    checkboxVolunteerApp: created.checkboxVolunteerApp,
+                    fee: created.fee,
+                    datePaid: created.datePaid
+                };
+
+                await syncRegistrationToAirtable(cleanedForAirtable);
+
+                // Update sync status to success
+                await wixData.update("SeasonRegistration", {
+                    _id: created._id,
+                    airtableSyncStatus: AIRTABLE.SYNC_STATUS.SYNCED,
+                    airtableSyncedAt: new Date()
+                });
+                console.log("Airtable sync successful for", created._id);
+
+            } catch (e) {
+                console.error("Airtable sync failed for", created._id, e);
+
+                // Update sync status to failed for retry later
+                try {
+                    await wixData.update("SeasonRegistration", {
+                        _id: created._id,
+                        airtableSyncStatus: AIRTABLE.SYNC_STATUS.FAILED,
+                        airtableSyncError: e.message || String(e),
+                        airtableSyncAttempts: 1,
+                        lastSyncAttempt: new Date()
+                    });
+                } catch (updateErr) {
+                    console.error("Failed to update sync status for", created._id, updateErr);
+                }
+
+                // Continue processing - don't block user flow on Airtable failures
+                // Admin can retry failed syncs later via backend job
             }
 
             const paidAmount = lineItem.totalPrice ??
