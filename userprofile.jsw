@@ -1,0 +1,28 @@
+// backend/userProfile.jsw
+import wixUsersBackend from "wix-users-backend";
+import wixData from "wix-data";
+
+/**
+ * Returns firstName, lastName, and email for the current user
+ * using PrivateMembersData.
+ */
+export async function getCurrentUserProfile() {
+    const user = wixUsersBackend.currentUser;
+
+    if (!user.loggedIn) {
+        return null;
+    }
+
+    // Email available via backend API
+    const email = await user.getEmail();
+
+    // Fetch member data from PrivateMembersData
+    const member = await wixData.get("PrivateMembersData", user.id).catch(() => null);
+
+    return {
+        email,
+        firstName: member?.firstName || "",
+        lastName: member?.lastName || "",
+        nickname: member?.nickname || ""
+    };
+}

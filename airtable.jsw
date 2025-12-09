@@ -1,281 +1,315 @@
 // backend/airtable.jsw
 import { fetch } from 'wix-fetch';
+import wixSecretsBackend from 'wix-secrets-backend';
+//joey
+/* -------------------------------------------------------------------
+   CONSTANTS
+------------------------------------------------------------------- */
+const BASE_ID = "appU008DNqprqcBR3";
 
-// Import constants - inline for backend compatibility
-const COLLECTIONS = {
-    REGISTRATION: "SeasonRegistration",
-    PLAYER: "UllPlayerList"
+const DIVISIONS_TABLE = "Divisions";
+const REG_TABLE = "All Players By Year";
+const SEASONS_TABLE = "Seasons";
+
+// Error bucket
+const ERROR_NOTE_FIELD = "fldbaJSYT7afOF8kq";
+
+/* -------------------------------------------------------------------
+   FIELD MAPPING (ONLY FIELDS YOU WANT TO STORE)
+------------------------------------------------------------------- */
+const FIELD_MAP = {
+    playerFirstName: "fldBQnKkcHQfFsRlE",
+    playerLastName: "fldKOEUqF5QkTSbpu",
+    _id: "fldMjkKEIeXzIAEs2",
+
+    // NEW text fields
+    playerId: "fldr39kcczMXYVQ71",
+    parentId: "fldAzIKtVXcvaXpVr",
+
+    // School fields
+    school: "fldZBze7shCMpRSwB",         // text
+    schoolOther: "fldUmzITqG9hdKhwZ",    // text
+
+    // Team parent contact
+    teamParentName: "fldANKootbkyScMwO",
+    teamParentEmail: "fldTkz5xytmx4qwO9",
+    teamParentPhone: "fldIrdaAv42E4xCQD",
+
+    // Sports & division
+    sport: "fld0qO9VUfvrsiNrd",
+    division: "fldQCpHIic6EZHwYT",
+    jerseySize: "fldm3PJS7MzAB30bW",
+
+    // Dates
+    datePaid: "flduY58laYhhq98qw",       // Airtable field with time
+    playerBirthDate: "fldOc4ZSrdnQ82585", // date
+
+    // Contact + requests
+    emergencyContactName: "fldAWqHo34aGbQgNB",
+    emergencyContactPhone: "fldzjkNv02gxgGbcb",
+    requestPlayDown: "fldjkJpZ8wDhP6MxI",
+    coachRequest: "fldY0RFCRo9mBFveH",   // text
+
+    // Volunteer fields
+    volunteerCoachName: "fldcxSZcJ2c2tSBdx",
+    volunteerCoachEmail: "fldWQJ9RX1m0Sjwjw",
+
+    // Volunteer single-selects
+    teamParentVolunteer: "fldMfAXEBw2ZxdNDt",
+    coachVolunteer: "fldjajn2crJQuunu0",
+    coachVolunteerType: "fld8DRQSVJXknOznt",
+    volunteerCoachNumber: "fldc8HsWuUm60LgLu",
+
+    // Fee
+    fee: "fld10em0hUD42rIFi"
 };
 
-const AIRTABLE = {
-    BASE_ID_MAIN: 'appU008DNqprqcBR3',
-    BASE_ID_FINANCIAL_AID: 'appVWHysw4oYfn9Ox',
-    TABLE_DIVISIONS: 'Divisions',
-    TABLE_ALL_PLAYERS: 'All Players by Year',
-    TABLE_FINANCIAL_AID: 'ULL Financial Aid Applications',
-    FIELD_DIVISION_AND_YEAR: 'Division and Year',
-    FIELD_DIVISION_NOTE: 'Division Specific Note',
-    FIELD_REGISTRATION_FEE: 'Registration Fee',
-    FIELD_PLAY_DOWN_ELIGIBLE: 'Play Down Eligible Division?',
-    FIELD_COACH_REQUEST_ELIGIBLE: 'Coach Request Eligible Division?',
-    SYNC_STATUS: {
-        PENDING: 'pending',
-        SYNCED: 'synced',
-        FAILED: 'failed'
-    },
-    ANSWERS: {
-        YES: 'Yes',
-        NO: 'No'
-    }
-};
+/* -------------------------------------------------------------------
+   SINGLE-SELECT FIELDS
+------------------------------------------------------------------- */
+const SINGLE_SELECT_FIELDS = new Set([
+    "fldQCpHIic6EZHwYT", // Division
+    "fld0qO9VUfvrsiNrd", // Sport
+    "fldm3PJS7MzAB30bW", // Jersey Size
+    "fldjkJpZ8wDhP6MxI", // Play Down/Up Request
+    "fldMfAXEBw2ZxdNDt", // teamParentVolunteer
+    "fldjajn2crJQuunu0", // coachVolunteer
+    "fld8DRQSVJXknOznt", // coachVolunteerType
+    "fldc8HsWuUm60LgLu"  // volunteerCoachNumber
+]);
 
-const VALIDATION = {
-    MAX_DIVISION_LENGTH: 100,
-    MAX_INPUT_LENGTH: 200
-};
-
-// ---->  AIRTABLE AUTHENTICATION SETUP  <----
-let getToken;
-
-// ---- OPTION A – USE WIX SECRETS (preferred) ----
-try {
-    const secrets = require('wix-secrets-backend');
-
-    getToken = async () => {
-        console.log('[Backend] Trying secrets.getSecret...');
-        // Replace 'AIRTABLE_TOKEN' if you used a different key name in Wix Secrets
-        const t = await secrets.getSecret('AIRTABLE_TOKEN');
-        console.log('[Backend] Secret loaded – first 8:', t?.substring(0,8));
-        return t;
-    };
-} catch (e) {
-    console.error('[Backend] secrets module failed to load/init:', e);
+/* -------------------------------------------------------------------
+   HELPERS
+------------------------------------------------------------------- */
+function cleanDivisionName(fullDivision) {
+    if (!fullDivision) return "";
+    return fullDivision.split(" - ")[0].trim();
 }
 
-// -----------------------------------------------------------------
-// --- CONSTANTS FOR AIRTABLE BASE & TABLES ---
-const BASE_ID = AIRTABLE.BASE_ID_MAIN;
+function log(...args) {
+    console.log("[Airtable]", ...args);
+}
 
-// Constants for the Division Lookup (getDivisionNote)
-const DIV_LOOKUP_TABLE = AIRTABLE.TABLE_DIVISIONS;
-const DIV_FIELD = AIRTABLE.FIELD_DIVISION_AND_YEAR;
-const NOTE_FIELD = AIRTABLE.FIELD_DIVISION_NOTE;
-const FEE_FIELD = AIRTABLE.FIELD_REGISTRATION_FEE;
-const PLAY_DOWN_FIELD = AIRTABLE.FIELD_PLAY_DOWN_ELIGIBLE;
-const COACH_REQUEST = AIRTABLE.FIELD_COACH_REQUEST_ELIGIBLE;
+async function getToken() {
+    const token = await wixSecretsBackend.getSecret("AIRTABLE_TOKEN");
+    if (!token) throw new Error("Missing Airtable token.");
+    return token;
+}
 
-// Constants for the Registration Sync (syncRegistrationToAirtable)
-const REG_SYNC_TABLE = AIRTABLE.TABLE_ALL_PLAYERS;
+function escapeFormula(v) {
+    return v ? v.replace(/'/g, "\\'") : "";
+}
 
-// -----------------------------------------------------------------
-// --- 1. DIVISION NOTE LOOKUP FUNCTION ---
+/* -------------------------------------------------------------------
+   SEASON LOOKUP
+------------------------------------------------------------------- */
+export async function getSeasonRecordId(seasonName) {
+    if (!seasonName) return null;
 
-export async function getDivisionNote(division) {
-    console.log('[Backend] getDivisionNote →', division);
+    const token = await getToken();
+    const safe = escapeFormula(seasonName);
 
-    if (!division?.trim()) {
-        return { success: true, note: '', fee: 0, playDownEligible: false, coachRequestEligible: false };
-    }
+    const url =
+        `https://api.airtable.com/v0/${BASE_ID}/${SEASONS_TABLE}` +
+        `?filterByFormula=({SeasonName}='${safe}')`;
 
-    // Validate division format (defense in depth)
-    // Expected format: "Sport Division - YYYY.N" (e.g., "Baseball Majors - 2026.1")
-    if (division.length > VALIDATION.MAX_DIVISION_LENGTH) {
-        console.error('[Backend] Division string too long, possible injection attempt');
-        return { success: false, error: 'Invalid division format' };
-    }
+    const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` }
+    });
 
-    let token;
+    const json = await res.json();
+
+    if (!json.records?.length) return null;
+
+    return json.records[0].id;
+}
+
+/* -------------------------------------------------------------------
+   MAIN SYNC FUNCTION
+------------------------------------------------------------------- */
+export async function syncRegistrationToAirtable(regDoc) {
+    log("====================================================");
+    log("sync START:", regDoc);
+
+    let errorNotes = [];
+    let fields = {};
+
     try {
-        token = await getToken?.();
+        const token = await getToken();
+
+        const seasonRecId = await getSeasonRecordId(regDoc.seasonName);
+
+        /* --------------------------------------
+           FIELD PROCESSING LOOP
+        -------------------------------------- */
+        for (const [key, value] of Object.entries(regDoc)) {
+
+            const airtableField = FIELD_MAP[key];
+
+            // Unknown fields → Error Note
+            if (!airtableField) {
+                errorNotes.push(`Unknown field: ${key} = ${value}`);
+                continue;
+            }
+
+            let safeValue = value;
+
+            // Division cleanup
+            if (key === "division") {
+                safeValue = cleanDivisionName(value);
+            }
+
+            // Fee numeric
+            else if (key === "fee") {
+                safeValue = Number(value || 0);
+            }
+
+            // Birthdate
+            else if (key === "playerBirthDate") {
+                if (value) {
+                    const d = new Date(value);
+                    if (isNaN(d.getTime())) {
+                        errorNotes.push(`Invalid playerBirthDate: ${value}`);
+                        continue;
+                    }
+                    safeValue = d;
+                } else {
+                    safeValue = null;
+                }
+            }
+
+            // NEW: datePaid → JS Date with timestamp
+            else if (key === "datePaid") {
+                if (value) {
+                    const d = new Date(value);
+                    if (isNaN(d.getTime())) {
+                        errorNotes.push(`Invalid datePaid: ${value}`);
+                        continue;
+                    }
+                    safeValue = d;
+                } else {
+                    safeValue = null;
+                }
+            }
+
+            /* -----------------------------------------
+               SINGLE-SELECT VALIDATION
+            ----------------------------------------- */
+            if (SINGLE_SELECT_FIELDS.has(airtableField)) {
+                if (!safeValue) {
+                    errorNotes.push(
+                        `Single-select field '${key}' was empty; skipping ${airtableField}.`
+                    );
+                    continue;
+                }
+            }
+
+            // Default handling
+            if (safeValue === undefined || safeValue === null) {
+                safeValue = "";
+            }
+
+            fields[airtableField] = safeValue;
+        }
+
+        /* --------------------------------------
+           APPLY LINKED SEASON RECORD
+        -------------------------------------- */
+        if (seasonRecId) {
+            fields["Seasons"] = [seasonRecId];
+        } else if (regDoc.seasonName) {
+            errorNotes.push(`No season match found for: ${regDoc.seasonName}`);
+        }
+
+        /* --------------------------------------
+           APPLY ERROR NOTES
+        -------------------------------------- */
+        if (errorNotes.length > 0) {
+            fields[ERROR_NOTE_FIELD] = errorNotes.join("\n");
+        }
+
+        log("FINAL FIELDS TO AIRTABLE:", fields);
+
+        /* --------------------------------------
+           SUBMIT TO AIRTABLE
+        -------------------------------------- */
+        const url = `https://api.airtable.com/v0/${BASE_ID}/${REG_TABLE}`;
+
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ records: [{ fields }] })
+        });
+
+        const json = await response.json();
+
+        if (!response.ok) {
+            log("Airtable error:", json);
+            return {
+                success: false,
+                error: "Airtable rejected the payload.",
+                details: json
+            };
+        }
+
+        return { success: true, result: json };
+
     } catch (err) {
-        console.error('[Backend] getToken threw:', err);
-        return { success: false, error: 'Token error' };
+        log("SYNC ERROR:", err);
+        return {
+            success: false,
+            error: "Internal sync error.",
+            details: err.toString()
+        };
     }
-
-    if (!token) {
-        console.error('[Backend] No token available');
-        return { success: false, error: 'Missing token' };
-    }
-
-    // ---- BUILD FILTER --------------------------------------------
-    // Properly escape division value to prevent formula injection
-    // Airtable formulas require proper escaping of quotes, backslashes, and special chars
-    const safeDiv = division
-        .replace(/\\/g, '\\\\')  // Escape backslashes first
-        .replace(/'/g, "\\'")     // Escape single quotes
-        .replace(/"/g, '\\"')     // Escape double quotes
-        .replace(/\n/g, '\\n')    // Escape newlines
-        .replace(/\r/g, '\\r');   // Escape carriage returns
-
-    const formula = `({${DIV_FIELD}} = '${safeDiv}')`;
-    const url = `https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent(DIV_LOOKUP_TABLE)}?filterByFormula=${encodeURIComponent(formula)}`;
-    console.log('[Backend] Airtable query for division:', division);
-
-    // ---- CALL AIRTABLE -------------------------------------------
+}
+/* -------------------------------------------------------------------
+   DIVISION LOOKUP
+------------------------------------------------------------------- */
+export async function getDivisionNote(divisionName) {
     try {
+        if (!divisionName) {
+            return { success: false, error: "No division name provided." };
+        }
+
+        const token = await getToken();
+        const safe = escapeFormula(divisionName);
+
+        const url =
+            `https://api.airtable.com/v0/${BASE_ID}/${DIVISIONS_TABLE}` +
+            `?filterByFormula=({Division and Year}='${safe}')`;
+
         const res = await fetch(url, {
             headers: { Authorization: `Bearer ${token}` }
         });
 
-        if (!res.ok) {
-            const txt = await res.text();
-            console.error('[Backend] Airtable error body →', txt);
-            return { success: false, error: `HTTP ${res.status}` };
-        }
-
         const json = await res.json();
 
-        if (!json.records || json.records.length === 0) {
-            console.warn(`[Backend] WARNING: No AirTable record found for key: ${division}`);
-            return { success: true, note: 'No division details found.', fee: 0, playDownEligible: false, coachRequestEligible: false };
+        if (!json.records?.length) {
+            return {
+                success: true,
+                note: "No division details found.",
+                fee: 0,
+                playDownEligible: false,
+                coachRequestEligible: false
+            };
         }
 
-        const record = json.records[0].fields;
+        const row = json.records[0].fields;
 
-        const note = record?.[NOTE_FIELD] ?? 'No note';
-        const fee = record?.[FEE_FIELD] ?? 0;
-
-        const playDownEligible = record?.[PLAY_DOWN_FIELD] === AIRTABLE.ANSWERS.YES;
-        const coachRequestEligible = record?.[COACH_REQUEST] === AIRTABLE.ANSWERS.YES;
-
-        console.log('[Backend] Play Down Eligible? →', playDownEligible);
-        console.log('[Backend] Coach Request Eligible? →', coachRequestEligible);
-
-        return { success: true, note, fee, playDownEligible, coachRequestEligible };
-
-    } catch (err) {
-        console.error('[Backend] fetch exception →', err);
-        return { success: false, error: err.message };
-    }
-}
-
-
-// -----------------------------------------------------------------
-// --- 2. REGISTRATION SYNC FUNCTION ---
-
-export async function syncRegistrationToAirtable(regDoc) {
-    try {
-        console.log(`[Backend] ========== AIRTABLE SYNC START ==========`);
-        console.log(`[Backend] syncRegistrationToAirtable() called for Reg ID: ${regDoc?._id}`);
-        console.log(`[Backend] Target table: ${REG_SYNC_TABLE}`);
-
-        if (!regDoc?._id) {
-            console.error("[Backend] Invalid registration document received.");
-            throw new Error("[SYNC ERROR] Invalid registration document");
-        }
-
-        console.log(`[Backend] Registration document validated. Player: ${regDoc.playerFirstName} ${regDoc.playerLastName}`);
-
-        let token;
-        try {
-            token = await getToken?.();
-        } catch (err) {
-            console.error("[Backend] getToken threw:", err);
-            throw new Error("[SYNC ERROR] Token retrieval failed: " + (err.message || String(err)));
-        }
-
-        if (!token) {
-            console.error("[Backend] No Airtable token available.");
-            throw new Error("[SYNC ERROR] Missing Airtable token - check Wix Secrets configuration");
-        }
-
-        console.log("[Backend] Token retrieved successfully");
-
-        const url = `https://api.airtable.com/v0/${BASE_ID}/${encodeURIComponent(REG_SYNC_TABLE)}`;
-
-        // Prepare Single Select fields: AirTable Single Selects must match the option name exactly
-        const playDownValue = regDoc.requestPlayDown ? AIRTABLE.ANSWERS.YES : AIRTABLE.ANSWERS.NO;
-        // Assuming coachRequest holds a name or text. If it's a checkbox, adjust this.
-        const coachRequestValue = regDoc.coachRequest ?? '';
-
-        // ----- LOOKUP PLAYER BIRTH DATE FROM UllPlayerList -----
-        // TEMPORARILY DISABLED TO DEBUG
-        let playerBirthDate = null;
-        console.log('[Backend] Player birth date lookup temporarily disabled for debugging');
-        // if (regDoc.player) {
-        //     try {
-        //         const playerRecord = await wixData.get(COLLECTIONS.PLAYER, regDoc.player);
-        //         if (playerRecord?.playerBirthDate) {
-        //             // Convert to ISO format for Airtable
-        //             playerBirthDate = new Date(playerRecord.playerBirthDate).toISOString();
-        //             console.log(`[Backend] Found player birth date: ${playerBirthDate}`);
-        //         } else {
-        //             console.warn(`[Backend] Player record found but no birth date for player ID: ${regDoc.player}`);
-        //         }
-        //     } catch (err) {
-        //         console.error(`[Backend] Failed to lookup player birth date for player ID ${regDoc.player}:`, err);
-        //         // Don't fail the entire sync if birth date lookup fails - just log and continue
-        //     }
-        // } else {
-        //     console.warn('[Backend] No player ID in regDoc, cannot lookup birth date');
-        // }
-
-        // ----- MAPPED FIELDS USING AIRTABLE FIELD IDs (YOUR LIST) -----
-        const fields = {
-            // Date Fields
-            "fldqdFthduXPFvTeH": new Date(regDoc.datePaid || regDoc._updatedDate || new Date()).toISOString(), // Registration Date
-
-            // Player Info (Single Line Text)
-            "fldBQnKkcHQfFsRlE": regDoc.playerFirstName ?? '',  // Player First Name
-            "fldKOEUqF5QkTSbpu": regDoc.playerLastName ?? '',    // Player Last Name
-
-            // Single Select Fields
-            "fldQCpHIic6EZHwYT": regDoc.division ?? 'N/A',                       // Division
-            "fld0qO9VUfvrsiNrd": regDoc.sport ?? 'N/A',                          // Sport
-            "fldm3PJS7MzAB30bW": regDoc.jerseySize ?? '',                        // Jersey Size
-            "fldZBze7shCMpRSwB": regDoc.school ?? '',                            // School (dropdown value)
-            "fldjkJpZ8wDhP6MxI": playDownValue,                                  // Play Up/Down Request ('Yes' or 'No')
-
-            // Text Fields
-            "fldUmzITqG9hdKhwZ": regDoc.schoolOther ?? '',                       // School (Other) - text field for "Other/Not Listed"
-            "flddIm4AFISBemJ0i": coachRequestValue,                              // Coach Request (Daisy/Coach Pitch Softball)
-            "fldY0RFCRo9mBFveH": coachRequestValue,                              // Coach Request (Pee Wee Baseball) - same value
-
-            // Volunteer Fields
-            "fldcxSZcJ2c2tSBdx": regDoc.volunteerCoachName ?? regDoc.teamParentName ?? '',     // Volunteer First Name (prefer coach)
-            "flddKgsTmGrjvfvqm": '',                                             // Volunteer Last Name (not collected separately)
-            "fldWQJ9RX1m0Sjwjw": regDoc.volunteerCoachEmail ?? regDoc.teamParentEmail ?? '',   // Volunteer Email (prefer coach)
-            "fld8DRQSVJXknOznt": regDoc.coachVolunteerType ?? regDoc.teamParentVolunteer ?? '', // Volunteer Type
-
-            // Critical Fields
-            "fldMjkKEIeXzIAEs2": regDoc._id,                                     // Wix Reg ID (dedupe key)
-            "fld10em0hUD42rIFi": regDoc.fee ?? 0,                                // Amount Paid / Registration Fee
-            "fldOc4ZSrdnQ82585": playerBirthDate,                                // Player Birth Date (critical for age formulas)
-
-            // NOTE: Seasons linked record (fldoGnDq4O2wUVtj8) requires the Airtable record ID from Seasons table
-            // This would need to be looked up based on seasonName
-
-            // NOTE: Emergency Contact Name is collected but not mapped (marked as optional in Airtable)
-            // Add if needed: regDoc.emergencyContactName, regDoc.emergencyContactPhone
+        return {
+            success: true,
+            note: row["Division Specific Note"] || "",
+            fee: row["Registration Fee"] || 0,
+            playDownEligible: row["Play Down Eligible Division?"] === "Yes",
+            coachRequestEligible: row["Coach Request Eligible Division?"] === "Yes"
         };
 
-        console.log("[Backend] Sending fields to Airtable:", fields);
-
-        const response = await fetch(url, {
-            method: 'post',
-            headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                records: [{ fields }]
-            })
-        });
-
-        if (!response.ok) {
-            const text = await response.text();
-            console.error("Airtable sync failed. Response:", text);
-            throw new Error(`[SYNC ERROR] Airtable API returned ${response.status}: ${text.substring(0, 200)}`);
-        }
-
-        const result = await response.json();
-        console.log("[Backend] Airtable synced OK. Result:", result);
-        return result;
-
-    } catch (error) {
-        // Re-throw with detailed error message that will be visible in frontend catch block
-        const errorMsg = error.message || String(error);
-        console.error("[Backend] SYNC FAILED:", errorMsg);
-        throw new Error(errorMsg.startsWith('[SYNC ERROR]') ? errorMsg : `[SYNC ERROR] ${errorMsg}`);
+    } catch (err) {
+        log("getDivisionNote ERROR:", err);
+        return { success: false, error: err.toString() };
     }
 }
