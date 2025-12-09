@@ -185,11 +185,6 @@ function handleSchoolOther() {
     button.disabled = !isFormValid();
 }
 
-// ===== VOLUNTEER FIELDS VISIBILITY =====
-function updateVolunteerFields() {
-    const teamParent = ($w("#teamParent").value || "").includes("Yes");
-    const coach = ($w("#coachVolunteer").value || "").includes("Yes");
-    const anyVolunteer = teamParent || coach;
 // =====================================================================
 // VOLUNTEER FIELDS VISIBILITY + AUTOFILL
 // =====================================================================
@@ -234,6 +229,7 @@ async function updateVolunteerFields() {
 
     const teamParentYes = (teamParentEl?.value || '').toLowerCase().includes('yes');
     const coachYes = (coachEl?.value || '').toLowerCase().includes('yes');
+    const anyVolunteer = teamParentYes || coachYes;
 
     // TEAM PARENT fields
     ['#inputParentVolunteerName', '#inputParentVolunteerEmail', '#inputParentVolunteerPhone'].forEach(id => {
