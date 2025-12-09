@@ -459,6 +459,7 @@ $w("#buttonRegister").onClick(async () => {
         jerseySize: $w("#dropdownJerseySize").value,
         emergencyContactName: $w("#inputEmergencyName").value,
         emergencyContactPhone: $w("#inputEmergencyPhone").value,
+        inputAdditionalEmail: $w("#inputAdditionalEmail").value || "",
         volunteerInterest: $w("#checkboxVolunteer")?.checked || false,
         requestPlayDown: $w("#PlayDown").value || "",
         coachRequest: $w("#coachRequest").value || "",

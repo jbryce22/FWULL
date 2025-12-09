@@ -112,6 +112,7 @@ $w.onReady(async () => {
                 jerseySize: reg.jerseySize,
                 emergencyContactName: reg.emergencyContactName,
                 emergencyContactPhone: reg.emergencyContactPhone,
+                inputAdditionalEmail: reg.inputAdditionalEmail,
                 // volunteerInterest: reg.volunteerInterest,  // Removed - not mapped to Airtable
                 requestPlayDown: reg.requestPlayDown,
                 coachRequest: reg.coachRequest,
@@ -167,6 +168,7 @@ $w.onReady(async () => {
                     jerseySize: created.jerseySize,
                     emergencyContactName: created.emergencyContactName,
                     emergencyContactPhone: created.emergencyContactPhone,
+                    inputAdditionalEmail: created.inputAdditionalEmail,
                     requestPlayDown: created.requestPlayDown,
                     coachRequest: created.coachRequest,
                     teamParentVolunteer: created.teamParentVolunteer,
