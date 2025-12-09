@@ -3,6 +3,7 @@ import wixData from 'wix-data';
 import wixUsers from 'wix-users';
 import wixLocation from 'wix-location';
 import { getDivisionNote } from 'backend/airtable.jsw';
+//import { syncRegistrationToAirtable } from 'backend/airtable.jsw';
 import { getCurrentUserProfile } from 'backend/userProfile.jsw';
 import { session } from 'wix-storage';
 import { clearCurrentCart } from 'backend/cartManager';
@@ -22,6 +23,9 @@ const PLAYER_COLLECTION = COLLECTIONS.PLAYER;
 let selectedPlayerId = null;
 let playerBirthDate = null;
 let playerDataMap = {};
+
+// 🚧 TEMPORARY: enable/disable debugging Airtable sync here
+const DEBUG_AIRTABLE_SYNC = true;
 
 // =====================================================================
 // USER PROFILE HELPER (from backend / PrivateMembersData)
@@ -137,7 +141,11 @@ function isFormValid() {
         '#teamParent',
         '#coachVolunteer'
     ];
-    const checkboxes = ['#checkbox2', '#checkbox3', '#checkbox4'];
+    const checkboxes = [
+        '#checkboxLLChildProtect',
+        '#checkboxMedicalRelease',
+        '#checkboxLLPrivacyPolicy'
+    ];
     const playDown = getElement('#PlayDown');
     const otherSchool = getElement('#inputSchoolother');
 
@@ -189,7 +197,7 @@ function handleSchoolOther() {
 // VOLUNTEER FIELDS VISIBILITY + AUTOFILL
 // =====================================================================
 
-// Toggle the 9 background-check / legal fields when coach volunteer is Yes/No
+// Toggle the background-check / legal fields when coach volunteer is Yes/No
 function toggleCoachVolunteerExtraFields(volValue) {
     const hide = !volValue || volValue.toLowerCase() === 'no';
 
@@ -201,8 +209,8 @@ function toggleCoachVolunteerExtraFields(volValue) {
         '#volunteerCoachPriorHistory',
         '#dropdownVolCrimesMinors',
         '#dropdownVolPriorCrime',
-        '#dropdownVolPending',
-        '#dropdownVolCriminalCharges'
+        '#dropdownVolPending'
+        // '#dropdownVolCriminalCharges'
     ];
 
     ids.forEach(id => {
@@ -259,14 +267,14 @@ async function updateVolunteerFields() {
         }
     });
 
-    // Show/hide additional volunteer fields when either volunteer option is selected
+    // Additional volunteer fields when any volunteer is selected
     [
         '#inputVolOtherLL',
         '#volunteerCoachPriorHistory',
         '#dropdownVolCrimesMinors',
         '#dropdownVolPriorCrime',
         '#dropdownVolPending',
-        '#dropdownVolCriminalCharges',
+        // '#dropdownVolCriminalCharges',
         '#checkboxVolPrivacyPolicy',
         '#checkboxChildProtectionProgram',
         '#checkboxVolunteerApp'
@@ -542,7 +550,8 @@ $w.onReady(async () => {
         '#coachRequest',
         '#inputSchoolother',
         '#textError',
-        '#textSuccess'
+        '#textSuccess',
+        '#textReset'
     ].forEach(id => safeHide(id));
 
     const teamParentEl = getElement('#teamParent');
@@ -627,14 +636,13 @@ $w.onReady(async () => {
                 console.log('[Reg Page] regQueue cleared');
 
                 // 3) Clear status messages safely
-                safeHide('#textSuccess');
-                safeHide('#textError');
+                safeHide('#textReset');
 
                 // 4) Show confirmation
-                const successText = getElement('#textSuccess');
+                const successText = getElement('#textReset');
                 if (successText) {
                     successText.text = 'Cart and pending registrations cleared.';
-                    safeShow('#textSuccess');
+                    safeShow('#textReset');
                 }
             } finally {
                 clearAllButton.enable();
@@ -642,7 +650,7 @@ $w.onReady(async () => {
         });
     }
 
-    // Attach Register button handler here for safety
+    // Attach Register button handler
     const registerButton = getElement('#buttonRegister');
     if (registerButton) {
         registerButton.onClick(handleRegisterClick);
@@ -684,6 +692,7 @@ async function handleRegisterClick() {
         const season = seasonDrop.value;
         const divText = divLabel.text || '';
         const division = divText.split('→')[1]?.trim() || 'Unknown';
+        const currentUser = await loadCurrentUserData();
 
         const schoolDrop = getElement('#inputSchool');
         const schoolOtherEl = getElement('#inputSchoolother');
@@ -693,6 +702,7 @@ async function handleRegisterClick() {
         const volunteerCheckbox = getElement('#checkboxVolunteer');
         const playDownEl = getElement('#PlayDown');
         const coachRequestEl = getElement('#coachRequest');
+        const parentcellEl = getElement('#inputParentCell');
         const teamParentEl = getElement('#teamParent');
         const parentVolName = getElement('#inputParentVolunteerName');
         const parentVolEmail = getElement('#inputParentVolunteerEmail');
@@ -714,15 +724,20 @@ async function handleRegisterClick() {
                 : schoolDropdown;
 
         const inputAdditionalEmailEl = getElement('#inputAdditionalEmail');
+        const inputAddressEl = getElement('#addressInput1');
         const inputVolOtherLLEl = getElement('#inputVolOtherLL');
         const volunteerCoachPriorHistoryEl = getElement('#volunteerCoachPriorHistory');
         const dropdownVolCrimesMinorsEl = getElement('#dropdownVolCrimesMinors');
         const dropdownVolPriorCrimeEl = getElement('#dropdownVolPriorCrime');
         const dropdownVolPendingEl = getElement('#dropdownVolPending');
-        const dropdownVolCriminalChargesEl = getElement('#dropdownVolCriminalCharges');
+        // const dropdownVolCriminalChargesEl = getElement('#dropdownVolCriminalCharges');
         const checkboxVolPrivacyPolicyEl = getElement('#checkboxVolPrivacyPolicy');
         const checkboxChildProtectionProgramEl = getElement('#checkboxChildProtectionProgram');
         const checkboxVolunteerAppEl = getElement('#checkboxVolunteerApp');
+        const priorexperienceEl = getElement('#inputPriorExperience');
+        const checkboxLLPrivacyPolicyEl = getElement('#checkboxLLPrivacyPolicy');
+        const checkboxMedicalReleaseEl = getElement('#checkboxMedicalRelease');
+        const checkboxLLChildProtectEl = getElement('#checkboxLLChildProtect');
 
         const registrationItem = {
             playerId: selectedPlayerId,
@@ -730,16 +745,21 @@ async function handleRegisterClick() {
             parentId: wixUsers.currentUser.id,
             playerFirstName: player.firstName,
             playerLastName: player.lastName,
+            parentFullName: `${currentUser.firstName} ${currentUser.lastName}` || '',
+            parentemail: currentUser.email || '',
+            parentcell: parentcellEl?.value || '',
             playerName: `${player.firstName} ${player.lastName}`,
             seasonName: season,
             sport: sport,
-            division: division, // full string, e.g. "Baseball Majors - 2026.1"
+            division: division,
             school: school,
             schoolOther: schoolOther,
             jerseySize: jerseyDrop?.value || '',
             emergencyContactName: emergencyNameEl?.value || '',
             emergencyContactPhone: emergencyPhoneEl?.value || '',
-            inputAdditionalEmail: inputAdditionalEmailEl?.value || '',
+            additionalEmail: inputAdditionalEmailEl?.value || '',
+            // 👇 Only the formatted string goes to Airtable (Option 1)
+            address: inputAddressEl?.value?.formatted || '',
             volunteerInterest: volunteerCheckbox?.checked || false,
             requestPlayDown: playDownEl?.value || '',
             coachRequest: coachRequestEl?.value || '',
@@ -758,11 +778,78 @@ async function handleRegisterClick() {
             dropdownVolCrimesMinors: dropdownVolCrimesMinorsEl?.value || '',
             dropdownVolPriorCrime: dropdownVolPriorCrimeEl?.value || '',
             dropdownVolPending: dropdownVolPendingEl?.value || '',
-            dropdownVolCriminalCharges: dropdownVolCriminalChargesEl?.value || '',
+            // dropdownVolCriminalCharges: dropdownVolCriminalChargesEl?.value || '',
             checkboxVolPrivacyPolicy: checkboxVolPrivacyPolicyEl?.checked || false,
             checkboxChildProtectionProgram: checkboxChildProtectionProgramEl?.checked || false,
-            checkboxVolunteerApp: checkboxVolunteerAppEl?.checked || false
+            checkboxVolunteerApp: checkboxVolunteerAppEl?.checked || false,
+            priorexperience: priorexperienceEl?.value || '',
+            LLPrivacyPolicy: checkboxLLPrivacyPolicyEl?.checked || false,
+            MedicalRelease: checkboxMedicalReleaseEl?.checked || false,
+            LLChildProtect: checkboxLLChildProtectEl?.checked || false
         };
+
+        
+// =====================================================================
+// TEMP DEBUG: Insert directly into CMS SeasonRegistration (skip checkout)
+// Remove this block when done debugging
+// =====================================================================
+//try {
+//    const debugCMSRecord = {
+  //      parent: registrationItem.parentId,
+  //      player: registrationItem.playerId,
+
+  //      playerId: registrationItem.playerId,
+  //      parentId: registrationItem.parentId,
+  ////      playerFirstName: registrationItem.playerFirstName,
+  //      playerLastName: registrationItem.playerLastName,
+ //       playerName: registrationItem.playerName,
+
+   //     sport: registrationItem.sport,
+  //     division: registrationItem.division,
+   //     jerseySize: registrationItem.jerseySize,
+  //     seasonName: registrationItem.seasonName,
+
+  //      school: registrationItem.school,
+  //      schoolOther: registrationItem.schoolOther,
+
+  //      emergencyContactName: registrationItem.emergencyContactName,
+ //       emergencyContactPhone: registrationItem.emergencyContactPhone,
+
+  //      inputAdditionalEmail: registrationItem.additionalEmail || "",
+
+ //       requestPlayDown: registrationItem.requestPlayDown,
+  //      coachRequest: registrationItem.coachRequest,
+
+  //      teamParentVolunteer: registrationItem.teamParentVolunteer,
+  //      teamParentName: registrationItem.teamParentName,
+   //     teamParentEmail: registrationItem.teamParentEmail,
+  //      teamParentPhone: registrationItem.teamParentPhone,
+
+ //       coachVolunteer: registrationItem.coachVolunteer,
+//        coachVolunteerType: registrationItem.coachVolunteerType,
+ //       volunteerCoachName: registrationItem.volunteerCoachName,
+ //      volunteerCoachEmail: registrationItem.volunteerCoachEmail,
+ //       volunteerCoachNumber: registrationItem.volunteerCoachNumber,
+
+  //      fee: 0,
+  //      paid: false,
+  //      datePaid: new Date(),
+
+ //       airtableSyncStatus: "pendingDebug",
+  //      airtableSyncAttempts: 0
+//    };
+
+ //   const insertedDebug = await wixData.insert("SeasonRegistration", debugCMSRecord);
+ //   console.log("🔥 DEBUG MODE — Inserted SeasonRegistration:", insertedDebug);
+
+   // safeShow("#textSuccess", "Debug CMS record created. (No checkout)");
+//} catch (err) {
+ //   console.error("🔥 DEBUG CMS INSERT FAILED:", err);
+ //   safeShow("#textError", "Debug CMS insert failed. Check console.");
+//}
+// STOP normal flow during debugging:
+//return;
+
 
         // Re-check duplicates before doing anything heavy
         const duplicateCheck = await checkForDuplicates(
@@ -786,7 +873,32 @@ async function handleRegisterClick() {
         }
 
         // ----------------------------------------------------------------
-        // Keep existing checkout flow (fee in cart, regQueue, redirect)
+        // 1) TEMP DEBUG: IMMEDIATE AIRTABLE SYNC BEFORE CHECKOUT
+        // ----------------------------------------------------------------
+        //if (DEBUG_AIRTABLE_SYNC) {
+       //     const airtablePayload = {
+       //         _id: `TEMP-${Date.now()}`,
+       //         ...registrationItem,
+       //         fee,
+       //         datePaid: new Date().toISOString()
+       //     };
+
+       //     console.log('[Airtable Debug] Sending registration to Airtable:', airtablePayload);
+
+       //     try {
+       //         const airtableRes = await syncRegistrationToAirtable(airtablePayload);
+       //         if (airtableRes?.success) {
+       //            console.log('[Airtable Debug] SUCCESS:', airtableRes);
+       //         } else {
+        //            console.error('[Airtable Debug] FAILED:', airtableRes);
+       //         }
+       //    } catch (err) {
+        //        console.error('[Airtable Debug ERROR]:', err);
+       //     }
+       // }
+
+        // ----------------------------------------------------------------
+        // 2) Keep existing checkout flow (fee in cart, regQueue, redirect)
         // ----------------------------------------------------------------
         let regQueue = [];
         try {
@@ -802,7 +914,7 @@ async function handleRegisterClick() {
         console.log('[DEBUG] Registration item being saved to queue:', itemToQueue);
         console.log('[DEBUG] Full regQueue after save:', regQueue);
 
-        safeShow(successTextId, 'Success! Taking you to payment...');
+        safeShow(successTextId, 'Success! Taking you to registration summary...');
         const checkoutUrl = `${ROUTES.CHECKOUT}?player=${encodeURIComponent(
             registrationItem.playerName
         )}&sport=${encodeURIComponent(sport)}&division=${encodeURIComponent(
