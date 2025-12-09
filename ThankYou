@@ -156,6 +156,15 @@ $w.onReady(async () => {
             console.log('[DEBUG] Inserted SeasonRegistration record:', created);
             console.log("Inserted SeasonRegistration:", created._id);
 
+            // Diagnostic: Check which fields were dropped by Wix
+            const sentFields = Object.keys(itemWithSyncStatus);
+            const receivedFields = Object.keys(created);
+            const droppedFields = sentFields.filter(f => !receivedFields.includes(f) && !f.startsWith('_'));
+            if (droppedFields.length > 0) {
+                console.error('🚨 MISSING CMS FIELDS - These fields were sent but not saved:', droppedFields);
+                console.error('👉 Add these fields to your SeasonRegistration CMS collection!');
+            }
+
             // Sync to Airtable with error handling and status tracking
             try {
                 // Create clean object for Airtable - exclude Wix system fields and internal tracking fields
