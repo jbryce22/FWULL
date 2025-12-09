@@ -102,19 +102,21 @@ $w.onReady(async () => {
             const itemToInsert = {
                 parent: reg.parentId,          // reference to PrivateMembersData
                 player: reg.playerId,          // reference to UllPlayerList
+                playerId: reg.playerId,        // text field - player ID as string
+                parentId: reg.parentId,        // text field - parent ID as string
                 playerFirstName: reg.playerFirstName,
                 playerLastName: reg.playerLastName,
-                // playerName: reg.playerName,     // Removed - only used for Wix display, not Airtable
-                // seasonName: reg.seasonName,     // Removed - season is handled via lookup
+                playerName: reg.playerName,
+                seasonName: reg.seasonName,
                 sport: reg.sport,
                 division: reg.division,
                 school: reg.school,
-                schoolOther: reg.schoolOther,  // For Airtable "School (Other)" field
+                schoolOther: reg.schoolOther,
                 jerseySize: reg.jerseySize,
                 emergencyContactName: reg.emergencyContactName,
                 emergencyContactPhone: reg.emergencyContactPhone,
                 inputAdditionalEmail: reg.inputAdditionalEmail,
-                // volunteerInterest: reg.volunteerInterest,  // Removed - not mapped to Airtable
+                volunteerInterest: reg.volunteerInterest,
                 requestPlayDown: reg.requestPlayDown,
                 coachRequest: reg.coachRequest,
                 teamParentVolunteer: reg.teamParentVolunteer,
@@ -126,7 +128,7 @@ $w.onReady(async () => {
                 volunteerCoachName: reg.volunteerCoachName,
                 volunteerCoachEmail: reg.volunteerCoachEmail,
                 volunteerCoachNumber: reg.volunteerCoachNumber,
-                // Additional volunteer fields
+                // Additional volunteer fields (must be added to CMS first)
                 inputVolOtherLL: reg.inputVolOtherLL,
                 volunteerCoachPriorHistory: reg.volunteerCoachPriorHistory,
                 dropdownVolCrimesMinors: reg.dropdownVolCrimesMinors,
