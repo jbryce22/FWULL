@@ -25,9 +25,12 @@ const FIELD_MAP = {
     // NEW text fields
     playerId: "fldr39kcczMXYVQ71",
     parentId: "fldAzIKtVXcvaXpVr",
-     additionalemail: "fld71iEEn5syQvE9M",
-     
-
+    additionalEmail: "fld71iEEn5syQvE9M",
+    parentemail: "flddib8kpwhQayf59",
+    address: "fldv51qSwwYW7BgPo",
+    parentcell: "fldjsSk1PhYi5BOiZ",
+    parentFullName: "fldetv0tcWoxLJ8zA",
+    
     // School fields
     school: "fldZBze7shCMpRSwB",         // text
     schoolOther: "fldUmzITqG9hdKhwZ",    // text
@@ -53,6 +56,9 @@ const FIELD_MAP = {
     emergencyContactPhone: "fldzjkNv02gxgGbcb",
     requestPlayDown: "fldjkJpZ8wDhP6MxI",
     coachRequest: "fldY0RFCRo9mBFveH",   // text
+    MedicalRelease: "fldas9wUXSieFE9e3",
+    LLChildProtect:"fldex3H724T4F2ipy",
+    LLPrivacyPolicy:"fldkzc5WwgHUlNc9q",
 
     // Volunteer fields
     volunteerCoachName: "fldcxSZcJ2c2tSBdx",
@@ -72,6 +78,7 @@ const FIELD_MAP = {
     checkboxVolPrivacyPolicy:"fldW2slKrJZQoSnV7",
     checkboxChildProtectionProgram:"fldjPiNHYYPoL8qw4",
     checkboxVolunteerApp:"fldvxJ0viQFGayuIV",
+    priorexperience: "fld6FHafPZRPWrsI5",
 
     // Fee
     fee: "fld10em0hUD42rIFi"
@@ -146,6 +153,8 @@ export async function getSeasonRecordId(seasonName) {
 
     return json.records[0].id;
 }
+
+
 
 /* -------------------------------------------------------------------
    MAIN SYNC FUNCTION
