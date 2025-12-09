@@ -124,6 +124,16 @@ $w.onReady(async () => {
                 volunteerCoachName: reg.volunteerCoachName,
                 volunteerCoachEmail: reg.volunteerCoachEmail,
                 volunteerCoachNumber: reg.volunteerCoachNumber,
+                // Additional volunteer fields
+                inputVolOtherLL: reg.inputVolOtherLL,
+                volunteerCoachPriorHistory: reg.volunteerCoachPriorHistory,
+                dropdownVolCrimesMinors: reg.dropdownVolCrimesMinors,
+                dropdownVolPriorCrime: reg.dropdownVolPriorCrime,
+                dropdownVolPending: reg.dropdownVolPending,
+                dropdownVolCriminalCharges: reg.dropdownVolCriminalCharges,
+                checkboxVolPrivacyPolicy: reg.checkboxVolPrivacyPolicy,
+                checkboxChildProtectionProgram: reg.checkboxChildProtectionProgram,
+                checkboxVolunteerApp: reg.checkboxVolunteerApp,
 
                 fee: price,
                 paid: true,
@@ -142,7 +152,47 @@ $w.onReady(async () => {
 
             // Sync to Airtable with error handling and status tracking
             try {
-                await syncRegistrationToAirtable(created);
+                // Create clean object for Airtable - exclude Wix system fields and internal tracking fields
+                const cleanedForAirtable = {
+                    _id: created._id,
+                    playerId: created.player,
+                    playerBirthDate: reg.playerBirthDate,
+                    parentId: created.parent,
+                    playerFirstName: created.playerFirstName,
+                    playerLastName: created.playerLastName,
+                    sport: created.sport,
+                    division: created.division,
+                    school: created.school,
+                    schoolOther: created.schoolOther,
+                    jerseySize: created.jerseySize,
+                    emergencyContactName: created.emergencyContactName,
+                    emergencyContactPhone: created.emergencyContactPhone,
+                    requestPlayDown: created.requestPlayDown,
+                    coachRequest: created.coachRequest,
+                    teamParentVolunteer: created.teamParentVolunteer,
+                    teamParentName: created.teamParentName,
+                    teamParentEmail: created.teamParentEmail,
+                    teamParentPhone: created.teamParentPhone,
+                    coachVolunteer: created.coachVolunteer,
+                    coachVolunteerType: created.coachVolunteerType,
+                    volunteerCoachName: created.volunteerCoachName,
+                    volunteerCoachEmail: created.volunteerCoachEmail,
+                    volunteerCoachNumber: created.volunteerCoachNumber,
+                    // Additional volunteer fields
+                    inputVolOtherLL: created.inputVolOtherLL,
+                    volunteerCoachPriorHistory: created.volunteerCoachPriorHistory,
+                    dropdownVolCrimesMinors: created.dropdownVolCrimesMinors,
+                    dropdownVolPriorCrime: created.dropdownVolPriorCrime,
+                    dropdownVolPending: created.dropdownVolPending,
+                    dropdownVolCriminalCharges: created.dropdownVolCriminalCharges,
+                    checkboxVolPrivacyPolicy: created.checkboxVolPrivacyPolicy,
+                    checkboxChildProtectionProgram: created.checkboxChildProtectionProgram,
+                    checkboxVolunteerApp: created.checkboxVolunteerApp,
+                    fee: created.fee,
+                    datePaid: created.datePaid
+                };
+
+                await syncRegistrationToAirtable(cleanedForAirtable);
 
                 // Update sync status to success
                 await wixData.update("SeasonRegistration", {

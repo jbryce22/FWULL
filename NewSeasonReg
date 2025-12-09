@@ -100,6 +100,7 @@ function handleSchoolOther() {
 function updateVolunteerFields() {
     const teamParent = ($w("#teamParent").value || "").includes("Yes");
     const coach = ($w("#coachVolunteer").value || "").includes("Yes");
+    const anyVolunteer = teamParent || coach;
 
     ["#inputParentVolunteerName", "#inputParentVolunteerEmail", "#inputParentVolunteerPhone"].forEach(id => {
         const el = $w(id);
@@ -111,6 +112,15 @@ function updateVolunteerFields() {
         const el = $w(id);
         if (coach) { safeExpand(id); el.required = true; }
         else { safeCollapse(id); el.value = ""; el.required = false; }
+    });
+
+    // Show/hide additional volunteer fields when either volunteer option is selected
+    ["#inputVolOtherLL", "#volunteerCoachPriorHistory", "#dropdownVolCrimesMinors",
+     "#dropdownVolPriorCrime", "#dropdownVolPending", "#dropdownVolCriminalCharges",
+     "#checkboxVolPrivacyPolicy", "#checkboxChildProtectionProgram", "#checkboxVolunteerApp"].forEach(id => {
+        const el = $w(id);
+        if (anyVolunteer) { safeExpand(id); }
+        else { safeCollapse(id); el.value = ""; }
     });
 
     handleSchoolOther();
@@ -460,7 +470,17 @@ $w("#buttonRegister").onClick(async () => {
         coachVolunteerType: $w("#coachVolunteerType").value || "",
         volunteerCoachName: $w("#volunteerCoachName").value || "",
         volunteerCoachEmail: $w("#volunteerCoachEmail").value || "",
-        volunteerCoachNumber: $w("#volunteerCoachNumber").value || ""
+        volunteerCoachNumber: $w("#volunteerCoachNumber").value || "",
+        // Additional volunteer fields
+        inputVolOtherLL: $w("#inputVolOtherLL").value || "",
+        volunteerCoachPriorHistory: $w("#volunteerCoachPriorHistory").value || "",
+        dropdownVolCrimesMinors: $w("#dropdownVolCrimesMinors").value || "",
+        dropdownVolPriorCrime: $w("#dropdownVolPriorCrime").value || "",
+        dropdownVolPending: $w("#dropdownVolPending").value || "",
+        dropdownVolCriminalCharges: $w("#dropdownVolCriminalCharges").value || "",
+        checkboxVolPrivacyPolicy: $w("#checkboxVolPrivacyPolicy")?.checked || false,
+        checkboxChildProtectionProgram: $w("#checkboxChildProtectionProgram")?.checked || false,
+        checkboxVolunteerApp: $w("#checkboxVolunteerApp")?.checked || false
     };
 
     // Fee from Airtable
