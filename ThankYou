@@ -94,6 +94,7 @@ $w.onReady(async () => {
         const summaryLines = [];
 
         for (const { reg, lineItem } of matched) {
+            console.log('[DEBUG] Processing registration from queue:', reg);
             const price =
                 (typeof lineItem.totalPrice === "number" ? lineItem.totalPrice : null) ??
                 ((lineItem.price || 0) * (lineItem.quantity || 1));
@@ -148,7 +149,9 @@ $w.onReady(async () => {
                 airtableSyncStatus: AIRTABLE.SYNC_STATUS.PENDING,
                 airtableSyncAttempts: 0
             };
+            console.log('[DEBUG] About to insert into CMS:', itemWithSyncStatus);
             const created = await wixData.insert("SeasonRegistration", itemWithSyncStatus);
+            console.log('[DEBUG] Inserted SeasonRegistration record:', created);
             console.log("Inserted SeasonRegistration:", created._id);
 
             // Sync to Airtable with error handling and status tracking
