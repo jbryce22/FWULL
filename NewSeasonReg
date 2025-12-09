@@ -658,69 +658,6 @@ async function handleRegisterClick() {
             return;
         }
 
-    const player = playerDataMap[selectedPlayerId];
-    const sport = $w("#dropdownSport").value;
-    const season = $w("#dropdownSeason").value;
-
-    const divText = $w("#textDivision").text;
-    const division = divText.split("→")[1]?.trim() || "Unknown";
-
-    // Capture school dropdown value AND "other" text separately for Airtable
-    const schoolDropdown = $w("#inputSchool").value;
-    const schoolOther = schoolDropdown === FORM_OPTIONS.SCHOOL_OTHER
-        ? $w("#inputSchoolother").value
-        : "";
-    const school = schoolDropdown === FORM_OPTIONS.SCHOOL_OTHER
-        ? $w("#inputSchoolother").value
-        : schoolDropdown;
-
-    const registrationItem = {
-        playerId: selectedPlayerId,                 // for reference field "player"
-        parentId: wixUsers.currentUser.id,          // for reference field "parent"
-        playerFirstName: player.firstName,
-        playerLastName: player.lastName,
-        playerName: `${player.firstName} ${player.lastName}`,
-        seasonName: season,
-        sport: sport,
-        division: division,
-        school: school,                             // For Wix DB and display
-        schoolOther: schoolOther,                   // For Airtable "School (Other)" field
-        jerseySize: $w("#dropdownJerseySize").value,
-        emergencyContactName: $w("#inputEmergencyName").value,
-        emergencyContactPhone: $w("#inputEmergencyPhone").value,
-        inputAdditionalEmail: $w("#inputAdditionalEmail").value || "",
-        volunteerInterest: $w("#checkboxVolunteer")?.checked || false,
-        requestPlayDown: $w("#PlayDown").value || "",
-        coachRequest: $w("#coachRequest").value || "",
-        teamParentVolunteer: $w("#teamParent").value || "",
-        teamParentName: $w("#inputParentVolunteerName").value || "",
-        teamParentEmail: $w("#inputParentVolunteerEmail").value || "",
-        teamParentPhone: $w("#inputParentVolunteerPhone").value || "",
-        coachVolunteer: $w("#coachVolunteer").value || "",
-        coachVolunteerType: $w("#coachVolunteerType").value || "",
-        volunteerCoachName: $w("#volunteerCoachName").value || "",
-        volunteerCoachEmail: $w("#volunteerCoachEmail").value || "",
-        volunteerCoachNumber: $w("#volunteerCoachNumber").value || "",
-        // Additional volunteer fields
-        inputVolOtherLL: $w("#inputVolOtherLL").value || "",
-        volunteerCoachPriorHistory: $w("#volunteerCoachPriorHistory").value || "",
-        dropdownVolCrimesMinors: $w("#dropdownVolCrimesMinors").value || "",
-        dropdownVolPriorCrime: $w("#dropdownVolPriorCrime").value || "",
-        dropdownVolPending: $w("#dropdownVolPending").value || "",
-        dropdownVolCriminalCharges: $w("#dropdownVolCriminalCharges").value || "",
-        checkboxVolPrivacyPolicy: $w("#checkboxVolPrivacyPolicy")?.checked || false,
-        checkboxChildProtectionProgram: $w("#checkboxChildProtectionProgram")?.checked || false,
-        checkboxVolunteerApp: $w("#checkboxVolunteerApp")?.checked || false
-    };
-
-    // Fee from Airtable
-    let fee = 0;
-    try {
-        const noteRes = await getDivisionNote(division);
-        if (noteRes.success) fee = noteRes.fee || 0;
-    } catch (e) {
-        console.error("[Register] Failed to fetch division fee:", e);
-    }
         const player = playerDataMap[selectedPlayerId];
         const sportDrop = getElement('#dropdownSport');
         const seasonDrop = getElement('#dropdownSeason');
@@ -765,6 +702,17 @@ async function handleRegisterClick() {
                 ? (schoolOtherEl?.value || '')
                 : schoolDropdown;
 
+        const inputAdditionalEmailEl = getElement('#inputAdditionalEmail');
+        const inputVolOtherLLEl = getElement('#inputVolOtherLL');
+        const volunteerCoachPriorHistoryEl = getElement('#volunteerCoachPriorHistory');
+        const dropdownVolCrimesMinorsEl = getElement('#dropdownVolCrimesMinors');
+        const dropdownVolPriorCrimeEl = getElement('#dropdownVolPriorCrime');
+        const dropdownVolPendingEl = getElement('#dropdownVolPending');
+        const dropdownVolCriminalChargesEl = getElement('#dropdownVolCriminalCharges');
+        const checkboxVolPrivacyPolicyEl = getElement('#checkboxVolPrivacyPolicy');
+        const checkboxChildProtectionProgramEl = getElement('#checkboxChildProtectionProgram');
+        const checkboxVolunteerAppEl = getElement('#checkboxVolunteerApp');
+
         const registrationItem = {
             playerId: selectedPlayerId,
             playerBirthDate: player.birthDate,
@@ -780,6 +728,7 @@ async function handleRegisterClick() {
             jerseySize: jerseyDrop?.value || '',
             emergencyContactName: emergencyNameEl?.value || '',
             emergencyContactPhone: emergencyPhoneEl?.value || '',
+            inputAdditionalEmail: inputAdditionalEmailEl?.value || '',
             volunteerInterest: volunteerCheckbox?.checked || false,
             requestPlayDown: playDownEl?.value || '',
             coachRequest: coachRequestEl?.value || '',
@@ -791,7 +740,17 @@ async function handleRegisterClick() {
             coachVolunteerType: coachTypeEl?.value || '',
             volunteerCoachName: coachNameEl?.value || '',
             volunteerCoachEmail: coachEmailEl?.value || '',
-            volunteerCoachNumber: coachPhoneEl?.value || ''
+            volunteerCoachNumber: coachPhoneEl?.value || '',
+            // Additional volunteer fields
+            inputVolOtherLL: inputVolOtherLLEl?.value || '',
+            volunteerCoachPriorHistory: volunteerCoachPriorHistoryEl?.value || '',
+            dropdownVolCrimesMinors: dropdownVolCrimesMinorsEl?.value || '',
+            dropdownVolPriorCrime: dropdownVolPriorCrimeEl?.value || '',
+            dropdownVolPending: dropdownVolPendingEl?.value || '',
+            dropdownVolCriminalCharges: dropdownVolCriminalChargesEl?.value || '',
+            checkboxVolPrivacyPolicy: checkboxVolPrivacyPolicyEl?.checked || false,
+            checkboxChildProtectionProgram: checkboxChildProtectionProgramEl?.checked || false,
+            checkboxVolunteerApp: checkboxVolunteerAppEl?.checked || false
         };
 
         // Re-check duplicates before doing anything heavy
