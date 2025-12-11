@@ -1,6 +1,7 @@
 // FILE: Registration Checkout Page (pvvy3.js)
 
 import wixLocation from 'wix-location';
+import wixWindow from 'wix-window';
 import { cart } from 'wix-stores-frontend';
 import { session } from 'wix-storage';
 import { fetch } from 'wix-fetch';
@@ -273,13 +274,33 @@ function setupButtons() {
         await addItemToCart(division, "another");
     });
 
-    // CLEAR ALL → Reset everything and go home
+    // CLEAR ALL → Reset everything and go home (with confirmation)
 $w('#buttonClearRegistrations').onClick(async () => {
     console.log('[Checkout] buttonClearRegistrations clicked');
 
-    // TODO: Add confirmation modal for better UX
-    // Recommended: Create a custom lightbox with "Are you sure?" message
-    // For now, we rely on clear button labeling to prevent accidents
+    // Get current queue count for confirmation message
+    const queue = getRegQueue();
+    const registrationCount = queue.length;
+
+    // Show confirmation modal before proceeding
+    let confirmResult;
+    try {
+        confirmResult = await wixWindow.openLightbox('ConfirmClearRegistrations', {
+            count: registrationCount
+        });
+    } catch (err) {
+        console.error('[Checkout] Error opening confirmation lightbox:', err);
+        // If lightbox fails to open, don't proceed with clearing
+        return;
+    }
+
+    // Check if user confirmed
+    if (!confirmResult || !confirmResult.confirmed) {
+        console.log('[Checkout] User cancelled clear operation');
+        return;
+    }
+
+    console.log('[Checkout] User confirmed clear operation - proceeding');
 
     // Disable immediately to prevent double-clicks
     $w('#buttonClearRegistrations').disable();
