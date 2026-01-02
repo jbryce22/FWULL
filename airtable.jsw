@@ -1,5 +1,3 @@
-
-
 // backend/airtable.jsw
 import { fetch } from 'wix-fetch';
 import wixSecretsBackend from 'wix-secrets-backend';
@@ -15,6 +13,10 @@ const SEASONS_TABLE = "Seasons";
 
 // Error bucket
 const ERROR_NOTE_FIELD = "fldbaJSYT7afOF8kq";
+
+// You can keep this, but your logs proved this ID is NOT the Divisions table field id.
+// We'll read by NAME first (works), and fall back to this ID.
+const DIV_REG_STATUS_FIELD = "fld1X55tPkcILV83i"; // Registration Status (ID - currently not matching)
 
 /* -------------------------------------------------------------------
    FIELD MAPPING (ONLY FIELDS YOU WANT TO STORE)
@@ -32,7 +34,7 @@ const FIELD_MAP = {
     address: "fldv51qSwwYW7BgPo",
     parentcell: "fldjsSk1PhYi5BOiZ",
     parentFullName: "fldetv0tcWoxLJ8zA",
-    
+
     // School fields
     school: "fldZBze7shCMpRSwB",         // text
     schoolOther: "fldUmzITqG9hdKhwZ",    // text
@@ -41,8 +43,6 @@ const FIELD_MAP = {
     teamParentName: "fldANKootbkyScMwO",
     teamParentEmail: "fldTkz5xytmx4qwO9",
     teamParentPhone: "fldIrdaAv42E4xCQD",
-   
-    
 
     // Sports & division
     sport: "fld0qO9VUfvrsiNrd",
@@ -50,7 +50,7 @@ const FIELD_MAP = {
     jerseySize: "fldm3PJS7MzAB30bW",
 
     // Dates
-    datePaid: "flduY58laYhhq98qw",       // Airtable field with time
+    datePaid: "flduY58laYhhq98qw",        // Airtable field with time
     playerBirthDate: "fldOc4ZSrdnQ82585", // date
 
     // Contact + requests
@@ -59,8 +59,8 @@ const FIELD_MAP = {
     requestPlayDown: "fldjkJpZ8wDhP6MxI",
     coachRequest: "fldY0RFCRo9mBFveH",   // text
     MedicalRelease: "fldas9wUXSieFE9e3",
-    LLChildProtect:"fldex3H724T4F2ipy",
-    LLPrivacyPolicy:"fldkzc5WwgHUlNc9q",
+    LLChildProtect: "fldex3H724T4F2ipy",
+    LLPrivacyPolicy: "fldkzc5WwgHUlNc9q",
 
     // Volunteer fields
     volunteerCoachName: "fldcxSZcJ2c2tSBdx",
@@ -72,14 +72,14 @@ const FIELD_MAP = {
     coachVolunteerType: "fld8DRQSVJXknOznt",
     volunteerCoachNumber: "fldc8HsWuUm60LgLu",
     inputVolOtherLL: "fldh2DVeqG7QWRp3x",
-    volunteerCoachPriorHistory:"fldpgCiv31IAKmYGE",
-    dropdownVolCrimesMinors:"fldFSDzrTnAWq6v72",
-    dropdownVolPriorCrime:"fldWeAc5DJNJ53BTL",
-    dropdownVolPending:"fldOlfCSkzjZExGXO",
-    dropdownVolCriminalCharges:"fldOlfCSkzjZExGXO",
-    checkboxVolPrivacyPolicy:"fldW2slKrJZQoSnV7",
-    checkboxChildProtectionProgram:"fldjPiNHYYPoL8qw4",
-    checkboxVolunteerApp:"fldvxJ0viQFGayuIV",
+    volunteerCoachPriorHistory: "fldpgCiv31IAKmYGE",
+    dropdownVolCrimesMinors: "fldFSDzrTnAWq6v72",
+    dropdownVolPriorCrime: "fldWeAc5DJNJ53BTL",
+    dropdownVolPending: "fldOlfCSkzjZExGXO",
+    dropdownVolCriminalCharges: "fldOlfCSkzjZExGXO",
+    checkboxVolPrivacyPolicy: "fldW2slKrJZQoSnV7",
+    checkboxChildProtectionProgram: "fldjPiNHYYPoL8qw4",
+    checkboxVolunteerApp: "fldvxJ0viQFGayuIV",
     priorexperience: "fld6FHafPZRPWrsI5",
 
     // Fee
@@ -97,17 +97,11 @@ const SINGLE_SELECT_FIELDS = new Set([
     "fldMfAXEBw2ZxdNDt", // teamParentVolunteer
     "fldjajn2crJQuunu0", // coachVolunteer
     "fld8DRQSVJXknOznt", // coachVolunteerType
-    "fldc8HsWuUm60LgLu",  // volunteerCoachNumber
-    "fldOlfCSkzjZExGXO", //
+    "fldc8HsWuUm60LgLu", // volunteerCoachNumber
+    "fldOlfCSkzjZExGXO",
     "fldpgCiv31IAKmYGE",
     "fldFSDzrTnAWq6v72",
-    "fldWeAc5DJNJ53BTL",
-    "fldOlfCSkzjZExGXO"
-
-
-
-
-
+    "fldWeAc5DJNJ53BTL"
 ]);
 
 /* -------------------------------------------------------------------
@@ -156,8 +150,6 @@ export async function getSeasonRecordId(seasonName) {
     return json.records[0].id;
 }
 
-
-
 /* -------------------------------------------------------------------
    MAIN SYNC FUNCTION
 ------------------------------------------------------------------- */
@@ -177,7 +169,6 @@ export async function syncRegistrationToAirtable(regDoc) {
            FIELD PROCESSING LOOP
         -------------------------------------- */
         for (const [key, value] of Object.entries(regDoc)) {
-
             const airtableField = FIELD_MAP[key];
 
             // Unknown fields → Error Note
@@ -212,7 +203,7 @@ export async function syncRegistrationToAirtable(regDoc) {
                 }
             }
 
-            // NEW: datePaid → JS Date with timestamp
+            // datePaid → JS Date with timestamp
             else if (key === "datePaid") {
                 if (value) {
                     const d = new Date(value);
@@ -300,6 +291,7 @@ export async function syncRegistrationToAirtable(regDoc) {
         };
     }
 }
+
 /* -------------------------------------------------------------------
    DIVISION LOOKUP
 ------------------------------------------------------------------- */
@@ -328,22 +320,104 @@ export async function getDivisionNote(divisionName) {
                 note: "No division details found.",
                 fee: 0,
                 playDownEligible: false,
-                coachRequestEligible: false
+                coachRequestEligible: false,
+                registrationStatus: ""
             };
         }
 
         const row = json.records[0].fields;
+        const recId = json.records?.[0]?.id;
+
+        // Debug logs (keep for now; remove once stable)
+        log("getDivisionNote record id:", recId);
+        log("getDivisionNote divisionName:", divisionName);
+        log("getDivisionNote fields keys:", Object.keys(row || {}));
+        log("getDivisionNote raw reg status by ID:", row?.[DIV_REG_STATUS_FIELD]);
+        log("getDivisionNote raw reg status by NAME:", row?.["Registration Status"]);
+
+        // ✅ Recommended: read by NAME first (works per your logs),
+        // fall back to field-id if/when you correct it.
+        const rawStatus =
+            row?.["Registration Status"] ??
+            row?.[DIV_REG_STATUS_FIELD] ??
+            "";
+
+        const registrationStatus = Array.isArray(rawStatus)
+            ? String(rawStatus[0] || "").trim()
+            : String(rawStatus || "").trim();
 
         return {
             success: true,
             note: row["Division Specific Note"] || "",
             fee: row["Registration Fee"] || 0,
             playDownEligible: row["Play Down Eligible Division?"] === "Yes",
-            coachRequestEligible: row["Coach Request Eligible Division?"] === "Yes"
+            coachRequestEligible: row["Coach Request Eligible Division?"] === "Yes",
+            registrationStatus
         };
 
     } catch (err) {
         log("getDivisionNote ERROR:", err);
+        return { success: false, error: err.toString() };
+    }
+}
+
+/* -------------------------------------------------------------------
+   DONATION SYNC FUNCTION
+------------------------------------------------------------------- */
+
+const DONATION_BASE_ID = "appVWHysw4oYfn9Ox";
+const DONATION_TABLE_ID = "tblqyQH7WrUViS2zj";
+
+// Airtable donation field IDs
+const DONATION_FIELDS = {
+    NAME: "fldgx60BzzeRispfW",               // "Your Name"
+    AMOUNT: "fld5xE3IeOhqG30CM",             // "Donation Amount"
+    EMAIL: "fldkYHMpVW5pBJIDA",              // "Your Email"
+    TYPE: "fldObFdLCIADbG8EN"                // "Donation at Registration" (single select)
+};
+
+export async function syncDonationToAirtable(donation) {
+    console.log("DONATION RECEIVED BY JSW:", donation);
+
+    try {
+        const token = await getToken();
+
+        // Build Airtable record using field IDs
+        const fields = {
+            [DONATION_FIELDS.NAME]: donation["Your Name"] || "",
+            [DONATION_FIELDS.AMOUNT]: Number(donation["Donation Amount"] || 0),
+            [DONATION_FIELDS.EMAIL]: donation["Your Email"] || "",
+
+            // SINGLE-SELECT FIELD
+            [DONATION_FIELDS.TYPE]: donation["fldObFdLCIADbG8EN"] || "Donation at Registration"
+        };
+
+        console.log("DONATION FIELDS PAYLOAD:", fields);
+
+        const url = `https://api.airtable.com/v0/${DONATION_BASE_ID}/${DONATION_TABLE_ID}`;
+
+        const response = await fetch(url, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                records: [{ fields }]
+            })
+        });
+
+        const json = await response.json();
+
+        if (!response.ok) {
+            console.error("AIRTABLE DONATION ERROR:", json);
+            return { success: false, error: json };
+        }
+
+        return { success: true, result: json };
+
+    } catch (err) {
+        console.error("DONATION JSW ERROR:", err);
         return { success: false, error: err.toString() };
     }
 }
