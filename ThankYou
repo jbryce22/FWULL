@@ -1,7 +1,7 @@
-// FILE: Thank You Page – FINAL CLEAN VERSION
+// FILE: Thank You Page — FINAL VERSION
 import { session } from 'wix-storage';
 import wixData from 'wix-data';
-import { syncRegistrationToAirtable } from 'backend/airtable.jsw';
+import { syncRegistrationToAirtable, syncDonationToAirtable } from 'backend/airtable.jsw';
 import { AIRTABLE } from 'public/constants.js';
 
 $w.onReady(async () => {
@@ -16,14 +16,20 @@ $w.onReady(async () => {
         // LOAD ORDER DETAILS
         // -----------------------------
         const order = await thankYou.getOrder();
+        console.log("Order Loaded:", order);
+
         if (!order) return;
+
+        //
+        // 🔥 PROCESS DONATIONS FIRST
+        //
+        await processDonations(order);
 
         const orderId = order._id;
         const lineItems = order.lineItems || [];
-        console.log("Order:", orderId, lineItems);
 
         // -----------------------------
-        // LOAD regQueue FROM SESSION
+        // LOAD regQueue
         // -----------------------------
         let regQueue = [];
         try {
@@ -39,7 +45,7 @@ $w.onReady(async () => {
         }
 
         // -----------------------------
-        // BUILD MATCHABLE PRODUCT SLOTS
+        // BUILD SLOTS FOR MATCHING
         // -----------------------------
         const slots = [];
         for (const li of lineItems) {
@@ -50,14 +56,14 @@ $w.onReady(async () => {
         }
 
         // -----------------------------
-        // MATCH QUEUED REGISTRATIONS → ORDER LINE ITEMS
+        // MATCH REGISTRATIONS TO LINE ITEMS
         // -----------------------------
         const matched = [];
         for (const reg of regQueue) {
             const idx = slots.findIndex(s =>
                 !s.used &&
                 typeof s.li.name === "string" &&
-                s.li.name.includes(reg.division) // <-- The matching rule
+                s.li.name.includes(reg.division)
             );
 
             if (idx !== -1) {
@@ -66,218 +72,93 @@ $w.onReady(async () => {
             }
         }
 
-        if (!matched.length) {
-            console.warn("No matched registrations.");
-            return;
-        }
+        console.log("Matched Registrations:", matched);
 
-        console.log("Matched registrations:", matched);
+        if (!matched.length) return;
 
-        // =============================
-        // PROCESS EACH MATCHED REG
-        // =============================
+        // -----------------------------
+        // INSERT EACH REGISTRATION
+        // -----------------------------
         for (const { reg, lineItem } of matched) {
 
-            // Insert to database with initial sync status
-            const itemWithSyncStatus = {
-                ...itemToInsert,
-                airtableSyncStatus: AIRTABLE.SYNC_STATUS.PENDING,
-                airtableSyncAttempts: 0
-            };
-            console.log('[DEBUG] About to insert into CMS:', itemWithSyncStatus);
-            const created = await wixData.insert("SeasonRegistration", itemWithSyncStatus);
-            console.log('[DEBUG] Inserted SeasonRegistration record:', created);
-            console.log("Inserted SeasonRegistration:", created._id);
-
-            // Diagnostic: Check which fields were dropped by Wix
-            const sentFields = Object.keys(itemWithSyncStatus);
-            const receivedFields = Object.keys(created);
-            const droppedFields = sentFields.filter(f => !receivedFields.includes(f) && !f.startsWith('_'));
-            if (droppedFields.length > 0) {
-                console.error('🚨 MISSING CMS FIELDS - These fields were sent but not saved:', droppedFields);
-                console.error('👉 Add these fields to your SeasonRegistration CMS collection!');
+            if (!reg.playerId || !reg.seasonName || !reg.sport) {
+                console.error("Skipping invalid registration:", reg);
+                continue;
             }
 
-            // Sync to Airtable with error handling and status tracking
-            try {
-                // Create clean object for Airtable - exclude Wix system fields and internal tracking fields
-                const cleanedForAirtable = {
-                    _id: created._id,
-                    playerId: created.player,
-                    playerBirthDate: reg.playerBirthDate,
-                    parentId: created.parent,
-                    playerFirstName: created.playerFirstName,
-                    playerLastName: created.playerLastName,
-                    sport: created.sport,
-                    division: created.division,
-                    school: created.school,
-                    schoolOther: created.schoolOther,
-                    jerseySize: created.jerseySize,
-                    emergencyContactName: created.emergencyContactName,
-                    emergencyContactPhone: created.emergencyContactPhone,
-                    inputAdditionalEmail: created.inputAdditionalEmail,
-                    requestPlayDown: created.requestPlayDown,
-                    coachRequest: created.coachRequest,
-                    teamParentVolunteer: created.teamParentVolunteer,
-                    teamParentName: created.teamParentName,
-                    teamParentEmail: created.teamParentEmail,
-                    teamParentPhone: created.teamParentPhone,
-                    coachVolunteer: created.coachVolunteer,
-                    coachVolunteerType: created.coachVolunteerType,
-                    volunteerCoachName: created.volunteerCoachName,
-                    volunteerCoachEmail: created.volunteerCoachEmail,
-                    volunteerCoachNumber: created.volunteerCoachNumber,
-                    // Additional volunteer fields
-                    inputVolOtherLL: created.inputVolOtherLL,
-                    volunteerCoachPriorHistory: created.volunteerCoachPriorHistory,
-                    dropdownVolCrimesMinors: created.dropdownVolCrimesMinors,
-                    dropdownVolPriorCrime: created.dropdownVolPriorCrime,
-                    dropdownVolPending: created.dropdownVolPending,
-                    dropdownVolCriminalCharges: created.dropdownVolCriminalCharges,
-                    checkboxVolPrivacyPolicy: created.checkboxVolPrivacyPolicy,
-                    checkboxChildProtectionProgram: created.checkboxChildProtectionProgram,
-                    checkboxVolunteerApp: created.checkboxVolunteerApp,
-                    fee: created.fee,
-                    datePaid: created.datePaid
-                };
-
-                await syncRegistrationToAirtable(cleanedForAirtable);
-
-                // Update sync status to success
-                await wixData.update("SeasonRegistration", {
-                    _id: created._id,
-                    airtableSyncStatus: AIRTABLE.SYNC_STATUS.SYNCED,
-                    airtableSyncedAt: new Date()
-                });
-                console.log("Airtable sync successful for", created._id);
-
-            } catch (e) {
-                console.error("Airtable sync failed for", created._id, e);
-
-                // Update sync status to failed for retry later
-                try {
-                    await wixData.update("SeasonRegistration", {
-                        _id: created._id,
-                        airtableSyncStatus: AIRTABLE.SYNC_STATUS.FAILED,
-                        airtableSyncError: e.message || String(e),
-                        airtableSyncAttempts: 1,
-                        lastSyncAttempt: new Date()
-                    });
-                } catch (updateErr) {
-                    console.error("Failed to update sync status for", created._id, updateErr);
-                }
-
-                // Continue processing - don't block user flow on Airtable failures
-                // Admin can retry failed syncs later via backend job
-            }
-
-            const paidAmount = lineItem.totalPrice ??
+            const paidAmount =
+                lineItem.totalPrice ??
                 ((lineItem.price || 0) * (lineItem.quantity || 1));
 
-            // -----------------------------
-            // BUILD CMS ITEM
-            // -----------------------------
             const cmsItem = {
                 parent: reg.parentId,
                 player: reg.playerId,
 
                 playerId: reg.playerId,
                 parentId: reg.parentId,
-              //  playerFirstName: reg.playerFirstName,
-              //  playerLastName: reg.playerLastName,
-              //  playerName: reg.playerName,
+                playerFirstName: reg.playerFirstName,
+                playerLastName: reg.playerLastName,
+                playerName: reg.playerName,
 
-              //  sport: reg.sport,
-            //    division: reg.division,
-               // seasonName: reg.seasonName,
-              //  jerseySize: reg.jerseySize,
+                sport: reg.sport,
+                division: reg.division,
+                seasonName: reg.seasonName,
+                jerseySize: reg.jerseySize,
+                school: reg.school,
+                schoolOther: reg.schoolOther,
 
-             //   school: reg.school,
-             //   schoolOther: reg.schoolOther,
+                emergencyContactName: reg.emergencyContactName,
+                emergencyContactPhone: reg.emergencyContactPhone,
 
-             //   emergencyContactName: reg.emergencyContactName,
-             //  emergencyContactPhone: reg.emergencyContactPhone,
+                inputAdditionalEmail: reg.additionalEmail || "",
+                requestPlayDown: reg.requestPlayDown || "",
+                coachRequest: reg.coachRequest || "",
 
-              //  inputAdditionalEmail: reg.additionalEmail || "",
-              //  requestPlayDown: reg.requestPlayDown || "",
-              //  coachRequest: reg.coachRequest || "",
+                teamParentVolunteer: reg.teamParentVolunteer,
+                teamParentName: reg.teamParentName,
+                teamParentEmail: reg.teamParentEmail,
+                teamParentPhone: reg.teamParentPhone,
 
-              //  teamParentVolunteer: reg.teamParentVolunteer,
-               // teamParentName: reg.teamParentName,
-              //  teamParentEmail: reg.teamParentEmail,
-               // teamParentPhone: reg.teamParentPhone,
+                coachVolunteer: reg.coachVolunteer,
+                coachVolunteerType: reg.coachVolunteerType,
+                volunteerCoachName: reg.volunteerCoachName,
+                volunteerCoachEmail: reg.volunteerCoachEmail,
+                volunteerCoachNumber: reg.volunteerCoachNumber,
 
-               // coachVolunteer: reg.coachVolunteer,
-               // coachVolunteerType: reg.coachVolunteerType,
-               // volunteerCoachName: reg.volunteerCoachName,
-               // volunteerCoachEmail: reg.volunteerCoachEmail,
-               // volunteerCoachNumber: reg.volunteerCoachNumber,
+                inputVolOtherLL: reg.inputVolOtherLL || "",
+                volunteerCoachPriorHistory: reg.volunteerCoachPriorHistory || "",
+                dropdownVolCrimesMinors: reg.dropdownVolCrimesMinors || "",
+                dropdownVolPriorCrime: reg.dropdownVolPriorCrime || "",
+                dropdownVolPending: reg.dropdownVolPending || "",
 
-                // Additional volunteer fields only if provided
-              //  inputVolOtherLL: reg.inputVolOtherLL || "",
-              // volunteerCoachPriorHistory: reg.volunteerCoachPriorHistory || "",
-              //  dropdownVolCrimesMinors: reg.dropdownVolCrimesMinors || "",
-              //  dropdownVolPriorCrime: reg.dropdownVolPriorCrime || "",
-              //  dropdownVolPending: reg.dropdownVolPending || "",
+                checkboxVolPrivacyPolicy: !!reg.checkboxVolPrivacyPolicy,
+                checkboxChildProtectionProgram: !!reg.checkboxChildProtectionProgram,
+                checkboxVolunteerApp: !!reg.checkboxVolunteerApp,
 
-              //  checkboxVolPrivacyPolicy: !!reg.checkboxVolPrivacyPolicy,
-              //  checkboxChildProtectionProgram: !!reg.checkboxChildProtectionProgram,
-              //  checkboxVolunteerApp: !!reg.checkboxVolunteerApp,
-
-               // fee: paidAmount,
-               // paid: true,
-               // orderId,
-             //   datePaid: new Date(),
-
-              //  airtableSyncStatus: AIRTABLE.SYNC_STATUS.PENDING,
-              //  airtableSyncAttempts: 0
+                fee: paidAmount,
+                paid: true,
+                orderId,
+                datePaid: new Date()
             };
 
-            // -----------------------------
-            // INSERT INTO CMS
-            // -----------------------------
             const inserted = await wixData.insert("SeasonRegistration", cmsItem);
             console.log("Inserted SeasonRegistration:", inserted._id);
 
-            // -----------------------------
-            // SYNC TO AIRTABLE
-            // -----------------------------
-           // try {
-           //     const airtablePayload = {
-            //        ...reg,
-            //        _id: inserted._id,
-            //        fee: paidAmount,
-             //       datePaid: inserted.datePaid,
-             //       playerBirthDate: reg.playerBirthDate
-              //  };
+            // Sync to Airtable
+            const airtablePayload = {
+                ...reg,
+                _id: inserted._id,
+                fee: paidAmount,
+                datePaid: inserted.datePaid,
+                playerBirthDate: reg.playerBirthDate
+            };
 
-             //   const result = await syncRegistrationToAirtable(airtablePayload);
-
-             //   if (result?.success) {
-              //      await wixData.update("SeasonRegistration", {
-              //          _id: inserted._id,
-              //         airtableSyncStatus: AIRTABLE.SYNC_STATUS.SYNCED,
-               //         airtableSyncedAt: new Date()
-               //     });
-               // } else {
-               //     throw new Error(result?.error || "Unknown Airtable error");
-              // }
-
-            //} catch (err) {
-               // console.error("Airtable sync error:", err);
-
-               // await wixData.update("SeasonRegistration", {
-               //     _id: inserted._id,
-               //     airtableSyncStatus: AIRTABLE.SYNC_STATUS.FAILED,
-               //     airtableSyncError: err.message || String(err),
-               //     airtableSyncAttempts: 1,
-               //     lastSyncAttempt: new Date()
-              //  });
-            //}
+            const result = await syncRegistrationToAirtable(airtablePayload);
+            console.log("Registration SYNced → Airtable:", result);
         }
 
         // -----------------------------
-        // REMOVE ONLY PROCESSED ITEMS
+        // CLEANUP SESSION STORE
         // -----------------------------
         const remaining = regQueue.filter(
             r => !matched.some(m =>
@@ -293,3 +174,63 @@ $w.onReady(async () => {
         console.error("Error on Thank You Page:", err);
     }
 });
+
+
+// ========================================================================
+// DONATION LOGIC — RUNS FIRST
+// ========================================================================
+
+const DONATION_PRODUCTS = {
+    "c8faba52-947c-4c0e-ae02-58406cfe5202": 20,
+    "80e47dc3-91ee-4b47-ad73-8c17dff81989": 50,
+    "ff86a5c7-c653-4f0e-b8b0-3b0fa3b80143": 100,
+    "9e1f3628-67c3-467e-bb99-91611426f0dc": 200
+};
+
+async function processDonations(order) {
+    const lineItems = order.lineItems || [];
+
+    const donorName = `${order.billingInfo?.firstName || ""} ${order.billingInfo?.lastName || ""}`.trim();
+    const donorEmail = order.billingInfo?.email || "";
+
+    console.log("Donation Donor:", donorName, donorEmail);
+
+    // Prevent double-processing
+    if (session.getItem("donationSynced") === "yes") {
+        console.log("Donation already synced — skipping duplicate.");
+        return;
+    }
+
+    for (const li of lineItems) {
+        const productId = li.productId;
+
+        if (DONATION_PRODUCTS[productId]) {
+            const amount = DONATION_PRODUCTS[productId];
+
+            console.log("FOUND DONATION:", amount);
+
+            const donationRecord = {
+            "Your Name": donorName,
+            "Donation Amount": amount,
+            "Your Email": donorEmail,
+
+            // NEW FIELD — Always set for donation-at-registration
+            "fldObFdLCIADbG8EN": "Donation at Registration"
+
+            };
+
+            console.log("Sending donation:", donationRecord);
+
+            try {
+                const res = await syncDonationToAirtable(donationRecord);
+                console.log("Donation SYNced → Airtable:", res);
+
+                // Mark donation as processed
+                session.setItem("donationSynced", "yes");
+
+            } catch (err) {
+                console.error("Donation Airtable sync failed:", err);
+            }
+        }
+    }
+}
