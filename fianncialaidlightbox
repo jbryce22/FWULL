@@ -1,0 +1,29 @@
+import { submitFinancialAid } from 'backend/financialAid';
+
+let handlerAttached = false; // Use a simple flag variable instead of attaching to $w.$page
+
+$w.onReady(() => {
+    console.log("Financial Aid page ready.");
+
+    if (handlerAttached) {
+        return; // Don't attach again
+    }
+    handlerAttached = true;
+
+    $w('#financialaidform').onSubmit(async (event) => {
+        console.log("Financial Aid Form Submitted (only once!)");
+
+        try {
+            const result = await submitFinancialAid(event);
+            console.log("Airtable result:", result);
+
+            if (result.success) {
+                // success UI
+            } else {
+                // error UI
+            }
+        } catch (err) {
+            console.error("Submit error:", err);
+        }
+    });
+});
