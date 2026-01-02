@@ -5,20 +5,50 @@ import { syncRegistrationToAirtable, syncDonationToAirtable } from 'backend/airt
 import { AIRTABLE } from 'public/constants.js';
 
 $w.onReady(async () => {
+    console.log("========================================");
+    console.log("Thank You Page Loading - Starting Order Processing");
+    console.log("Timestamp:", new Date().toISOString());
+    console.log("========================================");
+
     try {
         const thankYou = $w('#thankYouPage1');
         if (!thankYou || !thankYou.getOrder) {
-            console.error("Thank You Page element #thankYouPage1 missing.");
+            console.error("✗ CRITICAL: Thank You Page element #thankYouPage1 missing.");
+            console.error("Cannot retrieve order. Page element not found.");
             return;
         }
 
         // -----------------------------
         // LOAD ORDER DETAILS
         // -----------------------------
-        const order = await thankYou.getOrder();
-        console.log("Order Loaded:", order);
+        console.log("Attempting to load order details...");
+        let order;
+        try {
+            order = await thankYou.getOrder();
+            console.log("✓ Order Loaded Successfully");
+            console.log("Order ID:", order?._id);
+            console.log("Order Details:", order);
+        } catch (orderError) {
+            console.error("✗ CRITICAL: Failed to load order");
+            console.error("Order Error:", orderError);
+            console.error("Error details:", {
+                error: orderError.toString(),
+                stack: orderError.stack,
+                timestamp: new Date().toISOString()
+            });
+            return;
+        }
 
-        if (!order) return;
+        if (!order) {
+            console.error("✗ Order is null or undefined - cannot process");
+            return;
+        }
+
+        if (!order._id) {
+            console.error("✗ CRITICAL: Order missing _id field");
+            console.error("Order object:", order);
+            return;
+        }
 
         //
         // 🔥 PROCESS DONATIONS FIRST
@@ -31,34 +61,52 @@ $w.onReady(async () => {
         // -----------------------------
         // LOAD regQueue
         // -----------------------------
+        console.log("Loading registration queue from session...");
         let regQueue = [];
         try {
-            regQueue = JSON.parse(session.getItem("regQueue") || "[]");
+            const rawQueue = session.getItem("regQueue");
+            console.log("Raw regQueue from session:", rawQueue);
+            regQueue = JSON.parse(rawQueue || "[]");
+            console.log("✓ Parsed regQueue:", regQueue.length, "registrations found");
         } catch (err) {
-            console.warn("regQueue parse error:", err);
+            console.error("✗ regQueue parse error:", err);
+            console.error("Parse error details:", {
+                error: err.toString(),
+                rawData: session.getItem("regQueue"),
+                timestamp: new Date().toISOString()
+            });
             regQueue = [];
         }
 
         if (!regQueue.length) {
-            console.warn("No registration queue found.");
+            console.warn("✗ No registration queue found - nothing to process");
+            console.warn("Order ID:", orderId);
             return;
         }
+
+        console.log("✓ Processing", regQueue.length, "registration(s) for Order ID:", orderId);
 
         // -----------------------------
         // BUILD SLOTS FOR MATCHING
         // -----------------------------
+        console.log("Building line item slots for matching...");
         const slots = [];
         for (const li of lineItems) {
             const qty = li.quantity || 1;
+            console.log("Line item:", li.name, "Qty:", qty);
             for (let i = 0; i < qty; i++) {
                 slots.push({ li, used: false });
             }
         }
+        console.log("✓ Created", slots.length, "slot(s) from", lineItems.length, "line item(s)");
 
         // -----------------------------
         // MATCH REGISTRATIONS TO LINE ITEMS
         // -----------------------------
+        console.log("Matching registrations to line items...");
         const matched = [];
+        const unmatched = [];
+
         for (const reg of regQueue) {
             const idx = slots.findIndex(s =>
                 !s.used &&
@@ -69,97 +117,208 @@ $w.onReady(async () => {
             if (idx !== -1) {
                 slots[idx].used = true;
                 matched.push({ reg, lineItem: slots[idx].li });
+                console.log("✓ Matched:", reg.playerName, "to line item:", slots[idx].li.name);
+            } else {
+                unmatched.push(reg);
+                console.error("✗ UNMATCHED registration:", {
+                    playerName: reg.playerName,
+                    division: reg.division,
+                    sport: reg.sport,
+                    orderId,
+                    timestamp: new Date().toISOString()
+                });
             }
         }
 
-        console.log("Matched Registrations:", matched);
+        console.log("Matching complete - Matched:", matched.length, "Unmatched:", unmatched.length);
 
-        if (!matched.length) return;
+        if (unmatched.length > 0) {
+            console.error("✗ WARNING:", unmatched.length, "registration(s) could not be matched to line items");
+            console.error("Unmatched registrations:", unmatched.map(r => ({
+                name: r.playerName,
+                division: r.division
+            })));
+        }
+
+        if (!matched.length) {
+            console.error("✗ No registrations matched - nothing to process");
+            return;
+        }
 
         // -----------------------------
         // INSERT EACH REGISTRATION
         // -----------------------------
         for (const { reg, lineItem } of matched) {
 
+            // Validate required fields
             if (!reg.playerId || !reg.seasonName || !reg.sport) {
-                console.error("Skipping invalid registration:", reg);
+                console.error("CRITICAL: Invalid registration data - missing required fields");
+                console.error("Registration data:", {
+                    playerId: reg.playerId,
+                    seasonName: reg.seasonName,
+                    sport: reg.sport,
+                    playerName: reg.playerName,
+                    orderId,
+                    timestamp: new Date().toISOString()
+                });
                 continue;
             }
 
-            const paidAmount =
-                lineItem.totalPrice ??
-                ((lineItem.price || 0) * (lineItem.quantity || 1));
+            try {
+                const paidAmount =
+                    lineItem.totalPrice ??
+                    ((lineItem.price || 0) * (lineItem.quantity || 1));
 
-            const cmsItem = {
-                parent: reg.parentId,
-                player: reg.playerId,
+                const cmsItem = {
+                    parent: reg.parentId,
+                    player: reg.playerId,
 
-                playerId: reg.playerId,
-                parentId: reg.parentId,
-                playerFirstName: reg.playerFirstName,
-                playerLastName: reg.playerLastName,
-                playerName: reg.playerName,
+                    playerId: reg.playerId,
+                    parentId: reg.parentId,
+                    playerFirstName: reg.playerFirstName,
+                    playerLastName: reg.playerLastName,
+                    playerName: reg.playerName,
 
-                sport: reg.sport,
-                division: reg.division,
-                seasonName: reg.seasonName,
-                jerseySize: reg.jerseySize,
-                school: reg.school,
-                schoolOther: reg.schoolOther,
+                    sport: reg.sport,
+                    division: reg.division,
+                    seasonName: reg.seasonName,
+                    jerseySize: reg.jerseySize,
+                    school: reg.school,
+                    schoolOther: reg.schoolOther,
 
-                emergencyContactName: reg.emergencyContactName,
-                emergencyContactPhone: reg.emergencyContactPhone,
+                    emergencyContactName: reg.emergencyContactName,
+                    emergencyContactPhone: reg.emergencyContactPhone,
 
-                inputAdditionalEmail: reg.additionalEmail || "",
-                requestPlayDown: reg.requestPlayDown || "",
-                coachRequest: reg.coachRequest || "",
+                    inputAdditionalEmail: reg.additionalEmail || "",
+                    requestPlayDown: reg.requestPlayDown || "",
+                    coachRequest: reg.coachRequest || "",
 
-                teamParentVolunteer: reg.teamParentVolunteer,
-                teamParentName: reg.teamParentName,
-                teamParentEmail: reg.teamParentEmail,
-                teamParentPhone: reg.teamParentPhone,
+                    teamParentVolunteer: reg.teamParentVolunteer,
+                    teamParentName: reg.teamParentName,
+                    teamParentEmail: reg.teamParentEmail,
+                    teamParentPhone: reg.teamParentPhone,
 
-                coachVolunteer: reg.coachVolunteer,
-                coachVolunteerType: reg.coachVolunteerType,
-                volunteerCoachName: reg.volunteerCoachName,
-                volunteerCoachEmail: reg.volunteerCoachEmail,
-                volunteerCoachNumber: reg.volunteerCoachNumber,
+                    coachVolunteer: reg.coachVolunteer,
+                    coachVolunteerType: reg.coachVolunteerType,
+                    volunteerCoachName: reg.volunteerCoachName,
+                    volunteerCoachEmail: reg.volunteerCoachEmail,
+                    volunteerCoachNumber: reg.volunteerCoachNumber,
 
-                inputVolOtherLL: reg.inputVolOtherLL || "",
-                volunteerCoachPriorHistory: reg.volunteerCoachPriorHistory || "",
-                dropdownVolCrimesMinors: reg.dropdownVolCrimesMinors || "",
-                dropdownVolPriorCrime: reg.dropdownVolPriorCrime || "",
-                dropdownVolPending: reg.dropdownVolPending || "",
+                    inputVolOtherLL: reg.inputVolOtherLL || "",
+                    volunteerCoachPriorHistory: reg.volunteerCoachPriorHistory || "",
+                    dropdownVolCrimesMinors: reg.dropdownVolCrimesMinors || "",
+                    dropdownVolPriorCrime: reg.dropdownVolPriorCrime || "",
+                    dropdownVolPending: reg.dropdownVolPending || "",
 
-                checkboxVolPrivacyPolicy: !!reg.checkboxVolPrivacyPolicy,
-                checkboxChildProtectionProgram: !!reg.checkboxChildProtectionProgram,
-                checkboxVolunteerApp: !!reg.checkboxVolunteerApp,
+                    checkboxVolPrivacyPolicy: !!reg.checkboxVolPrivacyPolicy,
+                    checkboxChildProtectionProgram: !!reg.checkboxChildProtectionProgram,
+                    checkboxVolunteerApp: !!reg.checkboxVolunteerApp,
 
-                fee: paidAmount,
-                paid: true,
-                orderId,
-                datePaid: new Date()
-            };
+                    fee: paidAmount,
+                    paid: true,
+                    orderId,
+                    datePaid: new Date()
+                };
 
-            const inserted = await wixData.insert("SeasonRegistration", cmsItem);
-            console.log("Inserted SeasonRegistration:", inserted._id);
+                console.log("Attempting CMS insert for:", reg.playerName, "Order ID:", orderId);
 
-            // Sync to Airtable
-            const airtablePayload = {
-                ...reg,
-                _id: inserted._id,
-                fee: paidAmount,
-                datePaid: inserted.datePaid,
-                playerBirthDate: reg.playerBirthDate
-            };
+                // CRITICAL: Insert to Wix CMS
+                let inserted;
+                try {
+                    inserted = await wixData.insert("SeasonRegistration", cmsItem);
+                    console.log("✓ CMS INSERT SUCCESS:", inserted._id, "for", reg.playerName);
+                } catch (cmsError) {
+                    console.error("✗ CRITICAL: CMS INSERT FAILED");
+                    console.error("CMS Error:", cmsError);
+                    console.error("Failed registration details:", {
+                        playerName: reg.playerName,
+                        playerId: reg.playerId,
+                        parentId: reg.parentId,
+                        sport: reg.sport,
+                        division: reg.division,
+                        seasonName: reg.seasonName,
+                        orderId,
+                        fee: paidAmount,
+                        error: cmsError.toString(),
+                        stack: cmsError.stack,
+                        timestamp: new Date().toISOString()
+                    });
+                    console.error("Full CMS Item that failed:", JSON.stringify(cmsItem, null, 2));
 
-            const result = await syncRegistrationToAirtable(airtablePayload);
-            console.log("Registration SYNced → Airtable:", result);
+                    // Continue to next registration - don't let one failure stop all processing
+                    continue;
+                }
+
+                // Sync to Airtable
+                const airtablePayload = {
+                    ...reg,
+                    _id: inserted._id,
+                    fee: paidAmount,
+                    datePaid: inserted.datePaid,
+                    playerBirthDate: reg.playerBirthDate
+                };
+
+                console.log("Attempting Airtable sync for:", reg.playerName);
+
+                const result = await syncRegistrationToAirtable(airtablePayload);
+                console.log("Airtable sync result:", result.success ? "✓ SUCCESS" : "✗ FAILED");
+
+                // Handle Airtable sync failure - tag the order
+                if (!result.success) {
+                    console.error("✗ Airtable sync FAILED for registration:", inserted._id);
+                    console.error("Error details:", result.error, result.details);
+
+                    try {
+                        // Update the registration record with sync failure info
+                        await wixData.update("SeasonRegistration", {
+                            _id: inserted._id,
+                            airtableSyncStatus: "failed",
+                            airtableSyncError: JSON.stringify({
+                                error: result.error,
+                                details: result.details,
+                                timestamp: new Date().toISOString()
+                            })
+                        });
+                        console.log("Tagged registration with Airtable sync failure:", inserted._id);
+                    } catch (updateErr) {
+                        console.error("Failed to tag registration with sync error:", updateErr);
+                    }
+                } else {
+                    // Mark sync as successful
+                    try {
+                        await wixData.update("SeasonRegistration", {
+                            _id: inserted._id,
+                            airtableSyncStatus: "success"
+                        });
+                        console.log("✓ Registration fully processed:", inserted._id);
+                    } catch (updateErr) {
+                        console.error("Failed to mark registration as synced:", updateErr);
+                    }
+                }
+
+            } catch (unexpectedError) {
+                // Catch any other unexpected errors in the processing
+                console.error("✗ UNEXPECTED ERROR processing registration");
+                console.error("Error:", unexpectedError);
+                console.error("Registration context:", {
+                    playerName: reg.playerName,
+                    playerId: reg.playerId,
+                    sport: reg.sport,
+                    division: reg.division,
+                    orderId,
+                    error: unexpectedError.toString(),
+                    stack: unexpectedError.stack,
+                    timestamp: new Date().toISOString()
+                });
+                // Continue processing other registrations
+                continue;
+            }
         }
 
         // -----------------------------
         // CLEANUP SESSION STORE
         // -----------------------------
+        console.log("Cleaning up session storage...");
         const remaining = regQueue.filter(
             r => !matched.some(m =>
                 m.reg.playerId === r.playerId &&
@@ -169,9 +328,28 @@ $w.onReady(async () => {
         );
 
         session.setItem("regQueue", JSON.stringify(remaining));
+        console.log("✓ Session cleanup complete. Remaining items:", remaining.length);
+
+        console.log("========================================");
+        console.log("✓ Order Processing Complete");
+        console.log("Order ID:", orderId);
+        console.log("Processed:", matched.length, "registration(s)");
+        console.log("Timestamp:", new Date().toISOString());
+        console.log("========================================");
 
     } catch (err) {
-        console.error("Error on Thank You Page:", err);
+        console.error("========================================");
+        console.error("✗ CRITICAL ERROR on Thank You Page");
+        console.error("========================================");
+        console.error("Error:", err);
+        console.error("Error details:", {
+            message: err.message,
+            stack: err.stack,
+            toString: err.toString(),
+            timestamp: new Date().toISOString()
+        });
+        console.error("This is a top-level error - check all processing steps");
+        console.error("========================================");
     }
 });
 
@@ -225,11 +403,33 @@ async function processDonations(order) {
                 const res = await syncDonationToAirtable(donationRecord);
                 console.log("Donation SYNced → Airtable:", res);
 
-                // Mark donation as processed
+                if (!res.success) {
+                    console.error("Donation Airtable sync FAILED:", res.error);
+                    console.error("Failed donation details:", {
+                        amount,
+                        donor: donorName,
+                        email: donorEmail,
+                        orderId: order._id,
+                        error: res.error,
+                        timestamp: new Date().toISOString()
+                    });
+                } else {
+                    console.log("Donation successfully synced to Airtable");
+                }
+
+                // Mark donation as processed (even if sync failed, to avoid retries)
                 session.setItem("donationSynced", "yes");
 
             } catch (err) {
-                console.error("Donation Airtable sync failed:", err);
+                console.error("Donation Airtable sync exception:", err);
+                console.error("Exception details:", {
+                    amount,
+                    donor: donorName,
+                    email: donorEmail,
+                    orderId: order._id,
+                    error: err.toString(),
+                    timestamp: new Date().toISOString()
+                });
             }
         }
     }
