@@ -1,3 +1,4 @@
+// public/constants.js
 // Shared Constants for FWULL Registration System
 // This file centralizes all magic strings and configuration values
 
@@ -51,6 +52,7 @@ export const DIVISIONS = {
     BASEBALL_MAJORS: "Baseball Majors",
     BASEBALL_13U: "Baseball 13U Intermediate",
     BASEBALL_14U: "Baseball 14U Junior",
+    BASEBALL_15U: "Baseball 15U Senior",
 
     // Softball Divisions
     SOFTBALL_DAISY: "Softball Daisy League",
