@@ -181,10 +181,10 @@ $w.onReady(async () => {
 // ========================================================================
 
 const DONATION_PRODUCTS = {
-    "c8faba52-947c-4c0e-ae02-58406cfe5202": 20,
-    "80e47dc3-91ee-4b47-ad73-8c17dff81989": 50,
-    "ff86a5c7-c653-4f0e-b8b0-3b0fa3b80143": 100,
-    "9e1f3628-67c3-467e-bb99-91611426f0dc": 200
+    "c8faba52-947c-4c0e-ae02-58406cfe5202": 10,
+    "80e47dc3-91ee-4b47-ad73-8c17dff81989": 20,
+    "ff86a5c7-c653-4f0e-b8b0-3b0fa3b80143": 50,
+    "9e1f3628-67c3-467e-bb99-91611426f0dc": 100
 };
 
 async function processDonations(order) {
