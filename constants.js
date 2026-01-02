@@ -1,6 +1,7 @@
 // public/constants.js
 // Shared Constants for FWULL Registration System
 // This file centralizes all magic strings and configuration values
+// VERSION: 2026.01.15 - Fixed 15U division (force cache refresh)
 
 // ===== DATABASE COLLECTIONS =====
 export const COLLECTIONS = {
@@ -52,7 +53,7 @@ export const DIVISIONS = {
     BASEBALL_MAJORS: "Baseball Majors",
     BASEBALL_13U: "Baseball 13U Intermediate",
     BASEBALL_14U: "Baseball 14U Junior",
-    BASEBALL_15U: "Baseball 15U Senior",
+    BASEBALL_15U: 'Baseball 15U Senior',
 
     // Softball Divisions
     SOFTBALL_DAISY: "Softball Daisy League",
@@ -116,6 +117,7 @@ export const PRODUCT_MAP = {
     "Baseball Majors - 2026.1": "5d799042-713c-408f-b744-2be1effcc8d5",
     "Baseball 13U Intermediate - 2026.1": "b0321246-32d6-4619-a472-92030ef5d063",
     "Baseball 14U Junior - 2026.1": "a520c83e-cb40-4987-b448-09563f963010",
+    "Baseball 15U Senior - 2026.1": "992595c0-269c-4ea1-9eb2-80c61308447b",
     "Softball Majors - 2026.1": "ac9051d6-5da6-4887-a650-0f5f196a92b9",
     "Softball Minors - 2026.1": "9275d7d7-2810-4ef5-ba64-35a0cd109797",
     "Softball Coach Pitch - 2026.1": "d14e677f-78d8-4cd3-9d3f-13a880a6bdac",
