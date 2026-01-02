@@ -2,10 +2,6 @@
 import wixUsersBackend from "wix-users-backend";
 import wixData from "wix-data";
 
-/**
- * Returns firstName, lastName, and email for the current user
- * using PrivateMembersData.
- */
 export async function getCurrentUserProfile() {
     const user = wixUsersBackend.currentUser;
 
@@ -13,11 +9,20 @@ export async function getCurrentUserProfile() {
         return null;
     }
 
-    // Email available via backend API
     const email = await user.getEmail();
 
-    // Fetch member data from PrivateMembersData
-    const member = await wixData.get("PrivateMembersData", user.id).catch(() => null);
+    let member = null;
+    try {
+        member = await wixData.get(
+            "Members/PrivateMembersData",
+            user.id
+        );
+    } catch (e) {
+        console.warn(
+            "[userProfile] PrivateMembersData lookup failed:",
+            e.message
+        );
+    }
 
     return {
         email,
