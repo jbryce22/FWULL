@@ -245,6 +245,33 @@ $w.onReady(async () => {
                     });
                     console.error("Full CMS Item that failed:", JSON.stringify(cmsItem, null, 2));
 
+                    // Log error to AirtableSyncErrors collection
+                    try {
+                        await wixData.insert("AirtableSyncErrors", {
+                            orderId,
+                            registrationId: null, // No registration created yet
+                            playerName: reg.playerName,
+                            playerId: reg.playerId,
+                            parentId: reg.parentId,
+                            sport: reg.sport,
+                            division: reg.division,
+                            seasonName: reg.seasonName,
+                            errorType: "CMS_INSERT_FAILED",
+                            errorMessage: cmsError.toString(),
+                            errorDetails: JSON.stringify({
+                                error: cmsError.toString(),
+                                message: cmsError.message,
+                                stack: cmsError.stack,
+                                cmsItem: cmsItem,
+                                fee: paidAmount
+                            }),
+                            errorTimestamp: new Date()
+                        });
+                        console.log("✓ CMS insert error logged to AirtableSyncErrors collection");
+                    } catch (logError) {
+                        console.error("✗ Failed to log CMS error to AirtableSyncErrors:", logError);
+                    }
+
                     // Continue to next registration - don't let one failure stop all processing
                     continue;
                 }
@@ -263,37 +290,38 @@ $w.onReady(async () => {
                 const result = await syncRegistrationToAirtable(airtablePayload);
                 console.log("Airtable sync result:", result.success ? "✓ SUCCESS" : "✗ FAILED");
 
-                // Handle Airtable sync failure - tag the order
+                // Handle Airtable sync failure - log to errors collection
                 if (!result.success) {
                     console.error("✗ Airtable sync FAILED for registration:", inserted._id);
                     console.error("Error details:", result.error, result.details);
 
                     try {
-                        // Update the registration record with sync failure info
-                        await wixData.update("SeasonRegistration", {
-                            _id: inserted._id,
-                            airtableSyncStatus: "failed",
-                            airtableSyncError: JSON.stringify({
+                        // Log error to AirtableSyncErrors collection
+                        await wixData.insert("AirtableSyncErrors", {
+                            orderId,
+                            registrationId: inserted._id,
+                            playerName: reg.playerName,
+                            playerId: reg.playerId,
+                            parentId: reg.parentId,
+                            sport: reg.sport,
+                            division: reg.division,
+                            seasonName: reg.seasonName,
+                            errorType: "AIRTABLE_SYNC_FAILED",
+                            errorMessage: result.error || "Airtable sync rejected the payload",
+                            errorDetails: JSON.stringify({
                                 error: result.error,
                                 details: result.details,
-                                timestamp: new Date().toISOString()
-                            })
+                                airtablePayload: airtablePayload,
+                                fee: paidAmount
+                            }),
+                            errorTimestamp: new Date()
                         });
-                        console.log("Tagged registration with Airtable sync failure:", inserted._id);
-                    } catch (updateErr) {
-                        console.error("Failed to tag registration with sync error:", updateErr);
+                        console.log("✓ Airtable sync error logged to AirtableSyncErrors collection");
+                    } catch (logError) {
+                        console.error("✗ Failed to log Airtable error to AirtableSyncErrors:", logError);
                     }
                 } else {
-                    // Mark sync as successful
-                    try {
-                        await wixData.update("SeasonRegistration", {
-                            _id: inserted._id,
-                            airtableSyncStatus: "success"
-                        });
-                        console.log("✓ Registration fully processed:", inserted._id);
-                    } catch (updateErr) {
-                        console.error("Failed to mark registration as synced:", updateErr);
-                    }
+                    console.log("✓ Registration fully processed:", inserted._id);
                 }
 
             } catch (unexpectedError) {
@@ -310,6 +338,33 @@ $w.onReady(async () => {
                     stack: unexpectedError.stack,
                     timestamp: new Date().toISOString()
                 });
+
+                // Log unexpected error to AirtableSyncErrors collection
+                try {
+                    await wixData.insert("AirtableSyncErrors", {
+                        orderId,
+                        registrationId: null, // May not have been created
+                        playerName: reg.playerName,
+                        playerId: reg.playerId,
+                        parentId: reg.parentId,
+                        sport: reg.sport,
+                        division: reg.division,
+                        seasonName: reg.seasonName,
+                        errorType: "UNEXPECTED_ERROR",
+                        errorMessage: unexpectedError.toString(),
+                        errorDetails: JSON.stringify({
+                            error: unexpectedError.toString(),
+                            message: unexpectedError.message,
+                            stack: unexpectedError.stack,
+                            registrationData: reg
+                        }),
+                        errorTimestamp: new Date()
+                    });
+                    console.log("✓ Unexpected error logged to AirtableSyncErrors collection");
+                } catch (logError) {
+                    console.error("✗ Failed to log unexpected error to AirtableSyncErrors:", logError);
+                }
+
                 // Continue processing other registrations
                 continue;
             }
@@ -413,6 +468,33 @@ async function processDonations(order) {
                         error: res.error,
                         timestamp: new Date().toISOString()
                     });
+
+                    // Log donation error to AirtableSyncErrors collection
+                    try {
+                        await wixData.insert("AirtableSyncErrors", {
+                            orderId: order._id,
+                            registrationId: null,
+                            playerName: donorName,
+                            playerId: null,
+                            parentId: null,
+                            sport: "N/A",
+                            division: "DONATION",
+                            seasonName: "N/A",
+                            errorType: "DONATION_SYNC_FAILED",
+                            errorMessage: res.error || "Donation sync failed",
+                            errorDetails: JSON.stringify({
+                                error: res.error,
+                                amount: amount,
+                                donorName: donorName,
+                                donorEmail: donorEmail,
+                                donationRecord: donationRecord
+                            }),
+                            errorTimestamp: new Date()
+                        });
+                        console.log("✓ Donation sync error logged to AirtableSyncErrors collection");
+                    } catch (logError) {
+                        console.error("✗ Failed to log donation error to AirtableSyncErrors:", logError);
+                    }
                 } else {
                     console.log("Donation successfully synced to Airtable");
                 }
@@ -430,6 +512,35 @@ async function processDonations(order) {
                     error: err.toString(),
                     timestamp: new Date().toISOString()
                 });
+
+                // Log donation exception to AirtableSyncErrors collection
+                try {
+                    await wixData.insert("AirtableSyncErrors", {
+                        orderId: order._id,
+                        registrationId: null,
+                        playerName: donorName,
+                        playerId: null,
+                        parentId: null,
+                        sport: "N/A",
+                        division: "DONATION",
+                        seasonName: "N/A",
+                        errorType: "DONATION_SYNC_EXCEPTION",
+                        errorMessage: err.toString(),
+                        errorDetails: JSON.stringify({
+                            error: err.toString(),
+                            message: err.message,
+                            stack: err.stack,
+                            amount: amount,
+                            donorName: donorName,
+                            donorEmail: donorEmail,
+                            donationRecord: donationRecord
+                        }),
+                        errorTimestamp: new Date()
+                    });
+                    console.log("✓ Donation sync exception logged to AirtableSyncErrors collection");
+                } catch (logError) {
+                    console.error("✗ Failed to log donation exception to AirtableSyncErrors:", logError);
+                }
             }
         }
     }
