@@ -142,7 +142,7 @@ export async function sendRegistrationDataLostEmail(orderData) {
         const customerEmailBody = `
 Dear ${buyerName},
 
-Thank you for registering with Fort Worth Universal Little League!
+Thank you for registering with Fort Worth University Little League!
 
 We have successfully received your payment (Order #${orderNumber || orderId}), however we encountered a technical issue and some of your registration information was not captured in our system.
 
@@ -181,7 +181,7 @@ If you have any questions, please contact us at registration@fwull.com or presid
 
 Thank you for your patience and for being part of FWULL!
 
-Fort Worth Universal Little League
+Fort Worth University Little League
         `.trim();
 
         // Email body for office
