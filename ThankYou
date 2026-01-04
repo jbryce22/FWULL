@@ -11,6 +11,10 @@ $w.onReady(async () => {
     console.log("Timestamp:", new Date().toISOString());
     console.log("========================================");
 
+    let orderId = null;
+    let processingLockKey = null;
+    let processedKey = null;
+
     try {
         const thankYou = $w('#thankYouPage1');
         if (!thankYou || !thankYou.getOrder) {
@@ -51,12 +55,46 @@ $w.onReady(async () => {
             return;
         }
 
+        // -----------------------------
+        // PROCESSING LOCK - Prevent race conditions from duplicate page loads
+        // -----------------------------
+        orderId = order._id;
+        processingLockKey = `orderProcessing_${orderId}`;
+        processedKey = `orderProcessed_${orderId}`;
+
+        // Check if this order has already been fully processed
+        const alreadyProcessed = session.getItem(processedKey);
+        if (alreadyProcessed === "true") {
+            console.log("========================================");
+            console.log("⚠ ORDER ALREADY PROCESSED");
+            console.log("Order ID:", orderId);
+            console.log("This order has already been fully processed in this session.");
+            console.log("Skipping duplicate processing to prevent duplicate records.");
+            console.log("========================================");
+            return;
+        }
+
+        // Check if this order is currently being processed
+        const currentlyProcessing = session.getItem(processingLockKey);
+        if (currentlyProcessing === "true") {
+            console.log("========================================");
+            console.log("⚠ ORDER PROCESSING IN PROGRESS");
+            console.log("Order ID:", orderId);
+            console.log("This order is currently being processed by another page instance.");
+            console.log("Skipping to prevent race condition and duplicate records.");
+            console.log("========================================");
+            return;
+        }
+
+        // Set processing lock
+        session.setItem(processingLockKey, "true");
+        console.log("✓ Processing lock acquired for order:", orderId);
+
         //
         // 🔥 PROCESS DONATIONS FIRST
         //
         await processDonations(order);
 
-        const orderId = order._id;
         const lineItems = order.lineItems || [];
 
         // -----------------------------
@@ -653,6 +691,11 @@ $w.onReady(async () => {
         console.log("Timestamp:", new Date().toISOString());
         console.log("========================================");
 
+        // Mark order as fully processed and release lock
+        session.setItem(processedKey, "true");
+        session.removeItem(processingLockKey);
+        console.log("✓ Processing lock released and order marked as processed");
+
     } catch (err) {
         console.error("========================================");
         console.error("✗ CRITICAL ERROR on Thank You Page");
@@ -666,6 +709,16 @@ $w.onReady(async () => {
         });
         console.error("This is a top-level error - check all processing steps");
         console.error("========================================");
+
+        // Release processing lock on error
+        if (processingLockKey) {
+            try {
+                session.removeItem(processingLockKey);
+                console.log("✓ Processing lock released after error for order:", orderId);
+            } catch (lockErr) {
+                console.error("✗ Failed to release processing lock:", lockErr);
+            }
+        }
     }
 });
 
