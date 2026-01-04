@@ -108,8 +108,28 @@ function isDuplicateInQueue(division) {
 /* ========================================== */
 function setupButtons() {
 $w("#buttonPay").onClick(async () => {
+    // CRITICAL: Validate regQueue exists before proceeding
+    const regQueue = getRegQueue();
     const div = getCheckoutDivision();
-    if (div && isDuplicateInQueue(div)) {
+
+    // Check if regQueue is empty
+    if (!regQueue || regQueue.length === 0) {
+        $w("#textError").text = "No registrations found. Please add a registration first.";
+        safeShow("#textError");
+        console.error("[CRITICAL] Pay button clicked but regQueue is empty!");
+        return;
+    }
+
+    // Check if division exists
+    if (!div) {
+        $w("#textError").text = "Division not found. Please try adding your registration again.";
+        safeShow("#textError");
+        console.error("[CRITICAL] Pay button clicked but no division found!");
+        return;
+    }
+
+    // Check for duplicates
+    if (isDuplicateInQueue(div)) {
         showDuplicateWarning();
         return;
     }
@@ -119,7 +139,6 @@ $w("#buttonPay").onClick(async () => {
         $w("#textStatus").text = "Saving registration data...";
         safeShow("#textStatus");
 
-        const regQueue = getRegQueue();
         console.log("[CRITICAL] Saving regQueue to CMS before checkout:", regQueue);
 
         if (regQueue && regQueue.length > 0) {
