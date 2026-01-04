@@ -163,6 +163,38 @@ export async function syncRegistrationToAirtable(regDoc) {
     try {
         const token = await getToken();
 
+        // -----------------------------
+        // DUPLICATE PREVENTION: Check if record with this _id already exists in Airtable
+        // -----------------------------
+        if (regDoc._id) {
+            const checkUrl =
+                `https://api.airtable.com/v0/${BASE_ID}/${REG_TABLE}` +
+                `?filterByFormula=({${FIELD_MAP._id}}='${escapeFormula(regDoc._id)}')`;
+
+            try {
+                const checkRes = await fetch(checkUrl, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+
+                const checkJson = await checkRes.json();
+
+                if (checkJson.records && checkJson.records.length > 0) {
+                    log("⚠ DUPLICATE PREVENTED: Record already exists in Airtable");
+                    log("Airtable Record ID:", checkJson.records[0].id);
+                    log("CMS Registration ID:", regDoc._id);
+                    return {
+                        success: true,
+                        duplicate: true,
+                        message: "Record already exists in Airtable - duplicate prevented",
+                        airtableId: checkJson.records[0].id
+                    };
+                }
+            } catch (dupCheckErr) {
+                log("Warning: Duplicate check failed, proceeding with insert:", dupCheckErr);
+                // Continue with insert - better to risk a duplicate than lose data
+            }
+        }
+
         const seasonRecId = await getSeasonRecordId(regDoc.seasonName);
 
         /* --------------------------------------
