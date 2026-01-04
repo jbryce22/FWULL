@@ -59,15 +59,21 @@ $w.onReady(async () => {
         const lineItems = order.lineItems || [];
 
         // -----------------------------
-        // LOAD regQueue
+        // LOAD regQueue - STRICT EXECUTION WITH FALLBACK
         // -----------------------------
         console.log("Loading registration queue from session...");
         let regQueue = [];
+        let dataSource = "unknown";
+
+        // STEP 1: Try session storage first
         try {
             const rawQueue = session.getItem("regQueue");
             console.log("Raw regQueue from session:", rawQueue);
             regQueue = JSON.parse(rawQueue || "[]");
-            console.log("✓ Parsed regQueue:", regQueue.length, "registrations found");
+            if (regQueue.length > 0) {
+                console.log("✓ Loaded from session:", regQueue.length, "registrations");
+                dataSource = "session";
+            }
         } catch (err) {
             console.error("✗ regQueue parse error:", err);
             console.error("Parse error details:", {
@@ -78,11 +84,139 @@ $w.onReady(async () => {
             regQueue = [];
         }
 
+        // STEP 2: If session is empty, try to load from PendingRegistrations CMS
         if (!regQueue.length) {
-            console.warn("✗ No registration queue found - nothing to process");
-            console.warn("Order ID:", orderId);
+            console.warn("✗ Session regQueue is empty - attempting CMS retrieval");
+            console.log("[CRITICAL] Order buyer ID:", order.buyerInfo?.id);
+
+            try {
+                const buyerId = order.buyerInfo?.id || order.enteredBy?.id;
+
+                if (!buyerId) {
+                    console.error("✗ CRITICAL: Cannot retrieve registrations - no buyer ID in order");
+                } else {
+                    // Look for pending registrations for this user created in the last 2 hours
+                    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+
+                    const pendingRegsResult = await wixData.query("PendingRegistrations")
+                        .eq("userId", buyerId)
+                        .eq("status", "pending")
+                        .ge("createdAt", twoHoursAgo)
+                        .descending("createdAt")
+                        .limit(1)
+                        .find();
+
+                    console.log("[CRITICAL] PendingRegistrations query result:", pendingRegsResult);
+
+                    if (pendingRegsResult.items.length > 0) {
+                        const pendingReg = pendingRegsResult.items[0];
+                        console.log("✓ Found PendingRegistrations record:", pendingReg._id);
+
+                        try {
+                            regQueue = JSON.parse(pendingReg.registrations || "[]");
+                            console.log("✓ Loaded from CMS:", regQueue.length, "registrations");
+                            dataSource = "cms";
+
+                            // Mark as processed to prevent reuse
+                            await wixData.update("PendingRegistrations", {
+                                _id: pendingReg._id,
+                                status: "processing",
+                                orderId: orderId,
+                                processedAt: new Date()
+                            });
+                            console.log("✓ Marked PendingRegistrations as processing");
+
+                        } catch (parseErr) {
+                            console.error("✗ Failed to parse registrations from CMS:", parseErr);
+                        }
+                    } else {
+                        console.error("✗ No PendingRegistrations found for user:", buyerId);
+                    }
+                }
+            } catch (cmsError) {
+                console.error("✗ CRITICAL: Failed to retrieve from PendingRegistrations CMS");
+                console.error("CMS Error:", cmsError);
+                console.error("Error details:", {
+                    error: cmsError.toString(),
+                    message: cmsError.message,
+                    stack: cmsError.stack,
+                    timestamp: new Date().toISOString()
+                });
+
+                // Log to AirtableSyncErrors
+                try {
+                    await wixData.insert("AirtableSyncErrors", {
+                        orderId,
+                        registrationId: null,
+                        playerName: order.billingInfo?.firstName + " " + order.billingInfo?.lastName || "Unknown",
+                        playerId: null,
+                        parentId: order.buyerInfo?.id || null,
+                        sport: "N/A",
+                        division: "UNKNOWN",
+                        seasonName: "N/A",
+                        errorType: "CMS_RETRIEVAL_FAILED",
+                        errorMessage: "Failed to retrieve pending registrations from CMS",
+                        errorDetails: JSON.stringify({
+                            error: cmsError.toString(),
+                            message: cmsError.message,
+                            stack: cmsError.stack,
+                            orderId: orderId,
+                            buyerId: order.buyerInfo?.id,
+                            lineItems: order.lineItems
+                        }),
+                        errorTimestamp: new Date()
+                    });
+                } catch (logErr) {
+                    console.error("✗ Failed to log CMS retrieval error:", logErr);
+                }
+            }
+        }
+
+        if (!regQueue.length) {
+            console.error("========================================");
+            console.error("✗ CRITICAL: NO REGISTRATION DATA FOUND");
+            console.error("========================================");
+            console.error("Order ID:", orderId);
+            console.error("Order Number:", order.number);
+            console.error("Buyer:", order.billingInfo?.email);
+            console.error("Line Items:", order.lineItems);
+            console.error("This order has been paid but no registration data exists!");
+            console.error("========================================");
+
+            // Log critical data loss to AirtableSyncErrors
+            try {
+                await wixData.insert("AirtableSyncErrors", {
+                    orderId,
+                    registrationId: null,
+                    playerName: order.billingInfo?.firstName + " " + order.billingInfo?.lastName || "Unknown",
+                    playerId: null,
+                    parentId: order.buyerInfo?.id || null,
+                    sport: "N/A",
+                    division: "UNKNOWN - SEE LINE ITEMS",
+                    seasonName: "N/A",
+                    errorType: "NO_REGISTRATION_DATA",
+                    errorMessage: "CRITICAL: Payment collected but no registration data found in session or CMS",
+                    errorDetails: JSON.stringify({
+                        orderId: orderId,
+                        orderNumber: order.number,
+                        buyerEmail: order.billingInfo?.email,
+                        buyerName: order.billingInfo?.firstName + " " + order.billingInfo?.lastName,
+                        lineItems: order.lineItems,
+                        totalPaid: order.totals?.total,
+                        sessionRegQueue: session.getItem("regQueue"),
+                        timestamp: new Date().toISOString()
+                    }),
+                    errorTimestamp: new Date()
+                });
+                console.log("✓ Logged critical data loss to AirtableSyncErrors");
+            } catch (logErr) {
+                console.error("✗ Failed to log critical data loss:", logErr);
+            }
+
             return;
         }
+
+        console.log("✓ Registration data loaded from:", dataSource);
 
         console.log("✓ Processing", regQueue.length, "registration(s) for Order ID:", orderId);
 
@@ -385,9 +519,43 @@ $w.onReady(async () => {
         session.setItem("regQueue", JSON.stringify(remaining));
         console.log("✓ Session cleanup complete. Remaining items:", remaining.length);
 
+        // -----------------------------
+        // MARK PENDING REGISTRATION AS COMPLETED
+        // -----------------------------
+        if (dataSource === "cms") {
+            console.log("Marking PendingRegistrations record as completed...");
+            try {
+                const buyerId = order.buyerInfo?.id || order.enteredBy?.id;
+                if (buyerId) {
+                    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+
+                    const pendingRegsResult = await wixData.query("PendingRegistrations")
+                        .eq("userId", buyerId)
+                        .eq("status", "processing")
+                        .eq("orderId", orderId)
+                        .ge("createdAt", twoHoursAgo)
+                        .limit(1)
+                        .find();
+
+                    if (pendingRegsResult.items.length > 0) {
+                        const pendingReg = pendingRegsResult.items[0];
+                        await wixData.update("PendingRegistrations", {
+                            _id: pendingReg._id,
+                            status: "completed",
+                            completedAt: new Date()
+                        });
+                        console.log("✓ Marked PendingRegistrations as completed:", pendingReg._id);
+                    }
+                }
+            } catch (updateErr) {
+                console.error("✗ Failed to mark PendingRegistrations as completed:", updateErr);
+            }
+        }
+
         console.log("========================================");
         console.log("✓ Order Processing Complete");
         console.log("Order ID:", orderId);
+        console.log("Data Source:", dataSource);
         console.log("Processed:", matched.length, "registration(s)");
         console.log("Timestamp:", new Date().toISOString());
         console.log("========================================");
