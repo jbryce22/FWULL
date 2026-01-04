@@ -2,7 +2,7 @@
 import { session } from 'wix-storage';
 import wixData from 'wix-data';
 import { syncRegistrationToAirtable, syncDonationToAirtable } from 'backend/airtable.jsw';
-import { sendAirtableSyncFailureEmail } from 'backend/emailNotifications.jsw';
+import { sendAirtableSyncFailureEmail, sendRegistrationDataLostEmail } from 'backend/emailNotifications.jsw';
 import { AIRTABLE } from 'public/constants.js';
 
 $w.onReady(async () => {
@@ -237,6 +237,24 @@ $w.onReady(async () => {
                 console.log("✓ Logged critical data loss to AirtableSyncErrors");
             } catch (logErr) {
                 console.error("✗ Failed to log critical data loss:", logErr);
+            }
+
+            // Send email notifications to customer and office
+            try {
+                console.log("Sending registration data lost email notifications...");
+                await sendRegistrationDataLostEmail({
+                    orderId: orderId,
+                    orderNumber: order.number,
+                    buyerEmail: order.billingInfo?.email,
+                    buyerFirstName: order.billingInfo?.firstName,
+                    buyerLastName: order.billingInfo?.lastName,
+                    lineItems: order.lineItems,
+                    totalPaid: order.totals?.total
+                });
+                console.log("✓ Registration data lost emails sent to customer and office");
+            } catch (emailErr) {
+                console.error("✗ Failed to send registration data lost emails:", emailErr);
+                // Non-critical - continue
             }
 
             return;

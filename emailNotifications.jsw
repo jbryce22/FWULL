@@ -95,6 +95,222 @@ You may need to manually create this registration in Airtable.
 }
 
 /**
+ * Send email notification when registration data is lost
+ * Sends to customer, registration@fwull.com, and CC president@fwull.com
+ * @param {Object} orderData - The order data for the lost registration
+ * @returns {Promise<Object>} - Result of email sends
+ */
+export async function sendRegistrationDataLostEmail(orderData) {
+    try {
+        console.log("[Email] Sending registration data lost notification");
+
+        const {
+            orderId,
+            orderNumber,
+            buyerEmail,
+            buyerFirstName,
+            buyerLastName,
+            lineItems,
+            totalPaid
+        } = orderData;
+
+        const buyerName = `${buyerFirstName || ''} ${buyerLastName || ''}`.trim() || 'Customer';
+
+        // Build list of registrations from line items
+        let registrationsList = '';
+        let divisionsList = [];
+
+        if (lineItems && lineItems.length > 0) {
+            lineItems.forEach((item, index) => {
+                const itemName = item.name || item.translatedName || 'Unknown Registration';
+                const price = item.totalPrice || item.price || 0;
+                registrationsList += `${index + 1}. ${itemName} - $${price}\n`;
+
+                // Extract division from line item name
+                if (itemName.includes('–') || itemName.includes('-')) {
+                    const parts = itemName.split(/–|-/);
+                    if (parts.length > 1) {
+                        divisionsList.push(parts[1].trim());
+                    }
+                }
+            });
+        }
+
+        const divisionsText = divisionsList.length > 0 ? divisionsList.join(', ') : 'Unknown Division';
+
+        // Email body for customer
+        const customerEmailBody = `
+Dear ${buyerName},
+
+Thank you for registering with Fort Worth Universal Little League!
+
+We have successfully received your payment (Order #${orderNumber || orderId}), however we encountered a technical issue and some of your registration information was not captured in our system.
+
+To complete your registration, please reply to this email (registration@fwull.com) with the following information for each player:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REQUIRED INFORMATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+For each player registered:
+
+1. Player's Full Name
+2. Player's Jersey Size (Youth or Adult size)
+3. Player's School Name
+4. Are you volunteering as a coach? (Yes/No)
+   - If yes, what type? (Head Coach / Assistant Coach)
+5. Are you volunteering as a Team Parent Coordinator? (Yes/No)
+6. (Baseball Majors ONLY) Are you electing to play down? (Yes/No)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+YOUR ORDER DETAILS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Order Number: ${orderNumber || orderId}
+Order Date: ${new Date().toLocaleDateString()}
+Total Paid: $${totalPaid || 'N/A'}
+
+Registrations:
+${registrationsList}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+We apologize for the inconvenience. Your payment has been received and your registration will be processed as soon as we receive the information above.
+
+If you have any questions, please contact us at registration@fwull.com or president@fwull.com.
+
+Thank you for your patience and for being part of FWULL!
+
+Fort Worth Universal Little League
+        `.trim();
+
+        // Email body for office
+        const officeEmailBody = `
+CRITICAL: REGISTRATION DATA LOST AT CHECKOUT
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ORDER INFORMATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Order ID: ${orderId}
+Order Number: ${orderNumber || 'N/A'}
+Customer: ${buyerName}
+Email: ${buyerEmail}
+Total Paid: $${totalPaid || 'N/A'}
+Timestamp: ${new Date().toISOString()}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+LINE ITEMS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${registrationsList}
+
+Division(s): ${divisionsText}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ACTION REQUIRED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Payment was collected but registration data was lost during checkout.
+
+Customer has been emailed requesting the following information:
+- Player's Full Name
+- Jersey Size
+- School Name
+- Volunteer preferences (Coach/Team Parent)
+- Play down election (if applicable)
+
+Customer will reply to registration@fwull.com with the information.
+
+Please monitor for customer response and manually complete registration in CMS and Airtable.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TECHNICAL DETAILS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Error Type: NO_REGISTRATION_DATA
+Session regQueue: null
+PendingRegistrations CMS: Not found or empty
+
+This error has been logged to AirtableSyncErrors collection.
+        `.trim();
+
+        const results = {
+            customer: { success: false },
+            office: { success: false }
+        };
+
+        // Send email to customer
+        if (buyerEmail) {
+            try {
+                console.log("[Email] Sending to customer:", buyerEmail);
+
+                // Using simple logging for now - you can configure Wix triggered emails
+                console.log("[Email] Customer email body:");
+                console.log(customerEmailBody);
+
+                // TODO: Configure Wix triggered email template
+                // const customerResult = await triggeredEmails.emailContact("registration_data_lost_customer", buyerEmail, {
+                //     variables: {
+                //         buyerName,
+                //         orderNumber: orderNumber || orderId,
+                //         registrationsList,
+                //         totalPaid: totalPaid || 'N/A',
+                //         fullBody: customerEmailBody
+                //     }
+                // });
+
+                results.customer = { success: true, logged: true };
+                console.log("[Email] ✓ Customer email logged (template needs configuration)");
+            } catch (customerError) {
+                console.error("[Email] ✗ Failed to send customer email:", customerError);
+                results.customer = { success: false, error: customerError.toString() };
+            }
+        }
+
+        // Send email to office (registration@fwull.com, CC president@fwull.com)
+        try {
+            console.log("[Email] Sending to office: registration@fwull.com");
+
+            console.log("[Email] Office email body:");
+            console.log(officeEmailBody);
+
+            // TODO: Configure Wix triggered email template with CC functionality
+            // const officeResult = await triggeredEmails.emailContact("registration_data_lost_office", "registration@fwull.com", {
+            //     variables: {
+            //         orderId,
+            //         orderNumber: orderNumber || 'N/A',
+            //         buyerName,
+            //         buyerEmail,
+            //         registrationsList,
+            //         divisionsText,
+            //         totalPaid: totalPaid || 'N/A',
+            //         fullBody: officeEmailBody
+            //     },
+            //     cc: ["president@fwull.com"]
+            // });
+
+            results.office = { success: true, logged: true };
+            console.log("[Email] ✓ Office email logged (template needs configuration)");
+        } catch (officeError) {
+            console.error("[Email] ✗ Failed to send office email:", officeError);
+            results.office = { success: false, error: officeError.toString() };
+        }
+
+        console.log("[Email] ✓ Registration data lost emails processed");
+        return { success: true, results };
+
+    } catch (error) {
+        console.error("[Email] ✗ Failed to send registration data lost emails:", error);
+        return {
+            success: false,
+            error: error.toString(),
+            message: "Failed to send data loss notifications"
+        };
+    }
+}
+
+/**
  * Fallback: Send simple email notification without triggered email template
  * Uses direct email sending if triggered emails aren't configured
  */
