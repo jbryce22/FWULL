@@ -100,34 +100,50 @@ $w.onReady(async () => {
 
                     const pendingRegsResult = await wixData.query("PendingRegistrations")
                         .eq("userId", buyerId)
-                        .eq("status", "pending")
                         .ge("createdAt", twoHoursAgo)
                         .descending("createdAt")
-                        .limit(1)
                         .find();
 
                     console.log("[CRITICAL] PendingRegistrations query result:", pendingRegsResult);
 
                     if (pendingRegsResult.items.length > 0) {
-                        const pendingReg = pendingRegsResult.items[0];
-                        console.log("✓ Found PendingRegistrations record:", pendingReg._id);
+                        // Find first unused pending registration
+                        // (unused = not already processed for this order)
+                        let selectedPendingReg = null;
 
-                        try {
-                            regQueue = JSON.parse(pendingReg.registrations || "[]");
-                            console.log("✓ Loaded from CMS:", regQueue.length, "registrations");
-                            dataSource = "cms";
+                        for (const pending of pendingRegsResult.items) {
+                            // Check if this pending reg was already used for ANY order
+                            const alreadyProcessed = await wixData.query("SeasonRegistration")
+                                .eq("orderId", orderId)
+                                .limit(1)
+                                .find();
 
-                            // Mark as processed to prevent reuse
-                            await wixData.update("PendingRegistrations", {
-                                _id: pendingReg._id,
-                                status: "processing",
-                                orderId: orderId,
-                                processedAt: new Date()
-                            });
-                            console.log("✓ Marked PendingRegistrations as processing");
+                            if (alreadyProcessed.items.length === 0) {
+                                // This order hasn't been processed yet, use this pending reg
+                                selectedPendingReg = pending;
+                                break;
+                            } else {
+                                console.log("⚠ Skipping PendingRegistrations record (already processed):", pending._id);
+                            }
+                        }
 
-                        } catch (parseErr) {
-                            console.error("✗ Failed to parse registrations from CMS:", parseErr);
+                        if (selectedPendingReg) {
+                            console.log("✓ Found unused PendingRegistrations record:", selectedPendingReg._id);
+
+                            try {
+                                regQueue = JSON.parse(selectedPendingReg.registrations || "[]");
+                                console.log("✓ Loaded from CMS:", regQueue.length, "registrations");
+                                dataSource = "cms";
+
+                                // IMPORTANT: DO NOT UPDATE - keep PendingRegistrations immutable
+                                // We'll check SeasonRegistration.orderId to know if it's been used
+                                console.log("✓ Using PendingRegistrations record (immutable - no update)");
+
+                            } catch (parseErr) {
+                                console.error("✗ Failed to parse registrations from CMS:", parseErr);
+                            }
+                        } else {
+                            console.error("✗ All PendingRegistrations already processed for this order");
                         }
                     } else {
                         console.error("✗ No PendingRegistrations found for user:", buyerId);
@@ -519,38 +535,9 @@ $w.onReady(async () => {
         session.setItem("regQueue", JSON.stringify(remaining));
         console.log("✓ Session cleanup complete. Remaining items:", remaining.length);
 
-        // -----------------------------
-        // MARK PENDING REGISTRATION AS COMPLETED
-        // -----------------------------
-        if (dataSource === "cms") {
-            console.log("Marking PendingRegistrations record as completed...");
-            try {
-                const buyerId = order.buyerInfo?.id || order.enteredBy?.id;
-                if (buyerId) {
-                    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-
-                    const pendingRegsResult = await wixData.query("PendingRegistrations")
-                        .eq("userId", buyerId)
-                        .eq("status", "processing")
-                        .eq("orderId", orderId)
-                        .ge("createdAt", twoHoursAgo)
-                        .limit(1)
-                        .find();
-
-                    if (pendingRegsResult.items.length > 0) {
-                        const pendingReg = pendingRegsResult.items[0];
-                        await wixData.update("PendingRegistrations", {
-                            _id: pendingReg._id,
-                            status: "completed",
-                            completedAt: new Date()
-                        });
-                        console.log("✓ Marked PendingRegistrations as completed:", pendingReg._id);
-                    }
-                }
-            } catch (updateErr) {
-                console.error("✗ Failed to mark PendingRegistrations as completed:", updateErr);
-            }
-        }
+        // NOTE: PendingRegistrations is kept IMMUTABLE (no updates)
+        // We determine if a record was used by checking if orderId exists in SeasonRegistration
+        console.log("✓ PendingRegistrations kept immutable - no updates performed");
 
         console.log("========================================");
         console.log("✓ Order Processing Complete");
