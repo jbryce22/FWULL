@@ -342,6 +342,29 @@ $w.onReady(async () => {
                 continue;
             }
 
+            // -----------------------------
+            // DUPLICATE PREVENTION CHECK
+            // -----------------------------
+            try {
+                const existingReg = await wixData.query("SeasonRegistration")
+                    .eq("orderId", orderId)
+                    .eq("playerId", reg.playerId)
+                    .limit(1)
+                    .find();
+
+                if (existingReg.items.length > 0) {
+                    console.log("⚠ DUPLICATE PREVENTED: Registration already exists for this order");
+                    console.log("Existing Registration ID:", existingReg.items[0]._id);
+                    console.log("Order ID:", orderId);
+                    console.log("Player:", reg.playerName);
+                    console.log("Skipping duplicate insert and Airtable sync");
+                    continue;
+                }
+            } catch (dupCheckErr) {
+                console.error("✗ Failed to check for duplicates:", dupCheckErr);
+                // Continue anyway - better to risk a duplicate than lose data
+            }
+
             try {
                 const paidAmount =
                     lineItem.totalPrice ??
