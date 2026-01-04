@@ -383,6 +383,9 @@ $w.onReady(async () => {
             // -----------------------------
             // DUPLICATE PREVENTION CHECK
             // -----------------------------
+            let inserted = null;
+            let isDuplicate = false;
+
             try {
                 const existingReg = await wixData.query("SeasonRegistration")
                     .eq("orderId", orderId)
@@ -391,12 +394,13 @@ $w.onReady(async () => {
                     .find();
 
                 if (existingReg.items.length > 0) {
-                    console.log("⚠ DUPLICATE PREVENTED: Registration already exists for this order");
-                    console.log("Existing Registration ID:", existingReg.items[0]._id);
+                    isDuplicate = true;
+                    inserted = existingReg.items[0];
+                    console.log("⚠ DUPLICATE FOUND: Registration already exists in CMS");
+                    console.log("Existing Registration ID:", inserted._id);
                     console.log("Order ID:", orderId);
                     console.log("Player:", reg.playerName);
-                    console.log("Skipping duplicate insert and Airtable sync");
-                    continue;
+                    console.log("Skipping CMS insert but will attempt Airtable sync");
                 }
             } catch (dupCheckErr) {
                 console.error("✗ Failed to check for duplicates:", dupCheckErr);
@@ -408,65 +412,65 @@ $w.onReady(async () => {
                     lineItem.totalPrice ??
                     ((lineItem.price || 0) * (lineItem.quantity || 1));
 
-                const cmsItem = {
-                    parent: reg.parentId,
-                    player: reg.playerId,
+                // CRITICAL: Insert to Wix CMS (skip if duplicate)
+                if (!isDuplicate) {
+                    const cmsItem = {
+                        parent: reg.parentId,
+                        player: reg.playerId,
 
-                    playerId: reg.playerId,
-                    parentId: reg.parentId,
-                    playerFirstName: reg.playerFirstName,
-                    playerLastName: reg.playerLastName,
-                    playerName: reg.playerName,
+                        playerId: reg.playerId,
+                        parentId: reg.parentId,
+                        playerFirstName: reg.playerFirstName,
+                        playerLastName: reg.playerLastName,
+                        playerName: reg.playerName,
 
-                    sport: reg.sport,
-                    division: reg.division,
-                    seasonName: reg.seasonName,
-                    jerseySize: reg.jerseySize,
-                    school: reg.school,
-                    schoolOther: reg.schoolOther,
+                        sport: reg.sport,
+                        division: reg.division,
+                        seasonName: reg.seasonName,
+                        jerseySize: reg.jerseySize,
+                        school: reg.school,
+                        schoolOther: reg.schoolOther,
 
-                    emergencyContactName: reg.emergencyContactName,
-                    emergencyContactPhone: reg.emergencyContactPhone,
+                        emergencyContactName: reg.emergencyContactName,
+                        emergencyContactPhone: reg.emergencyContactPhone,
 
-                    inputAdditionalEmail: reg.additionalEmail || "",
-                    requestPlayDown: reg.requestPlayDown || "",
-                    coachRequest: reg.coachRequest || "",
+                        inputAdditionalEmail: reg.additionalEmail || "",
+                        requestPlayDown: reg.requestPlayDown || "",
+                        coachRequest: reg.coachRequest || "",
 
-                    teamParentVolunteer: reg.teamParentVolunteer,
-                    teamParentName: reg.teamParentName,
-                    teamParentEmail: reg.teamParentEmail,
-                    teamParentPhone: reg.teamParentPhone,
+                        teamParentVolunteer: reg.teamParentVolunteer,
+                        teamParentName: reg.teamParentName,
+                        teamParentEmail: reg.teamParentEmail,
+                        teamParentPhone: reg.teamParentPhone,
 
-                    coachVolunteer: reg.coachVolunteer,
-                    coachVolunteerType: reg.coachVolunteerType,
-                    volunteerCoachName: reg.volunteerCoachName,
-                    volunteerCoachEmail: reg.volunteerCoachEmail,
-                    volunteerCoachNumber: reg.volunteerCoachNumber,
+                        coachVolunteer: reg.coachVolunteer,
+                        coachVolunteerType: reg.coachVolunteerType,
+                        volunteerCoachName: reg.volunteerCoachName,
+                        volunteerCoachEmail: reg.volunteerCoachEmail,
+                        volunteerCoachNumber: reg.volunteerCoachNumber,
 
-                    inputVolOtherLL: reg.inputVolOtherLL || "",
-                    volunteerCoachPriorHistory: reg.volunteerCoachPriorHistory || "",
-                    dropdownVolCrimesMinors: reg.dropdownVolCrimesMinors || "",
-                    dropdownVolPriorCrime: reg.dropdownVolPriorCrime || "",
-                    dropdownVolPending: reg.dropdownVolPending || "",
+                        inputVolOtherLL: reg.inputVolOtherLL || "",
+                        volunteerCoachPriorHistory: reg.volunteerCoachPriorHistory || "",
+                        dropdownVolCrimesMinors: reg.dropdownVolCrimesMinors || "",
+                        dropdownVolPriorCrime: reg.dropdownVolPriorCrime || "",
+                        dropdownVolPending: reg.dropdownVolPending || "",
 
-                    checkboxVolPrivacyPolicy: !!reg.checkboxVolPrivacyPolicy,
-                    checkboxChildProtectionProgram: !!reg.checkboxChildProtectionProgram,
-                    checkboxVolunteerApp: !!reg.checkboxVolunteerApp,
+                        checkboxVolPrivacyPolicy: !!reg.checkboxVolPrivacyPolicy,
+                        checkboxChildProtectionProgram: !!reg.checkboxChildProtectionProgram,
+                        checkboxVolunteerApp: !!reg.checkboxVolunteerApp,
 
-                    fee: paidAmount,
-                    paid: true,
-                    orderId,
-                    datePaid: new Date()
-                };
+                        fee: paidAmount,
+                        paid: true,
+                        orderId,
+                        datePaid: new Date()
+                    };
 
-                console.log("Attempting CMS insert for:", reg.playerName, "Order ID:", orderId);
+                    console.log("Attempting CMS insert for:", reg.playerName, "Order ID:", orderId);
 
-                // CRITICAL: Insert to Wix CMS
-                let inserted;
-                try {
-                    inserted = await wixData.insert("SeasonRegistration", cmsItem);
-                    console.log("✓ CMS INSERT SUCCESS:", inserted._id, "for", reg.playerName);
-                } catch (cmsError) {
+                    try {
+                        inserted = await wixData.insert("SeasonRegistration", cmsItem);
+                        console.log("✓ CMS INSERT SUCCESS:", inserted._id, "for", reg.playerName);
+                    } catch (cmsError) {
                     console.error("✗ CRITICAL: CMS INSERT FAILED");
                     console.error("CMS Error:", cmsError);
                     console.error("Failed registration details:", {
@@ -511,16 +515,26 @@ $w.onReady(async () => {
                         console.error("✗ Failed to log CMS error to AirtableSyncErrors:", logError);
                     }
 
-                    // Continue to next registration - don't let one failure stop all processing
+                        // Continue to next registration - don't let one failure stop all processing
+                        continue;
+                    }
+                } else {
+                    console.log("✓ Using existing CMS record for Airtable sync:", inserted._id);
+                }
+
+                // Verify we have a valid CMS record before Airtable sync
+                if (!inserted || !inserted._id) {
+                    console.error("✗ CRITICAL: No CMS record available for Airtable sync");
+                    console.error("Player:", reg.playerName);
                     continue;
                 }
 
-                // Sync to Airtable
+                // Sync to Airtable (for both new inserts and duplicates)
                 const airtablePayload = {
                     ...reg,
                     _id: inserted._id,
                     fee: paidAmount,
-                    datePaid: inserted.datePaid,
+                    datePaid: inserted.datePaid || inserted._createdDate,
                     playerBirthDate: reg.playerBirthDate
                 };
 
