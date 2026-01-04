@@ -6,6 +6,8 @@ import { session } from 'wix-storage';
 import { fetch } from 'wix-fetch';
 import { clearCurrentCart } from 'backend/cartManager';
 import wixWindow from 'wix-window';   // ←←← ADD THIS IMPORT AT THE TOP
+import wixData from 'wix-data';
+import wixUsers from 'wix-users';
 const REG_URL  = "/registrationplayer";
 const HOME_URL = "/";
 const CART_URL = "/cart-page";
@@ -107,12 +109,50 @@ function isDuplicateInQueue(division) {
 function setupButtons() {
 $w("#buttonPay").onClick(async () => {
     const div = getCheckoutDivision();
-    if (div && isDuplicateInQueue(div)) { 
-        showDuplicateWarning(); 
-        return; 
+    if (div && isDuplicateInQueue(div)) {
+        showDuplicateWarning();
+        return;
     }
 
     try {
+        // ───── STEP 0: CRITICAL - Save regQueue to CMS BEFORE checkout
+        $w("#textStatus").text = "Saving registration data...";
+        safeShow("#textStatus");
+
+        const regQueue = getRegQueue();
+        console.log("[CRITICAL] Saving regQueue to CMS before checkout:", regQueue);
+
+        if (regQueue && regQueue.length > 0) {
+            try {
+                const currentUser = wixUsers.currentUser;
+                const userId = currentUser.loggedIn ? currentUser.id : null;
+
+                if (!userId) {
+                    throw new Error("User not logged in - cannot save registration");
+                }
+
+                // Save to PendingRegistrations collection
+                // IMMUTABLE: registrations field never updated, only status field
+                const pendingReg = await wixData.insert("PendingRegistrations", {
+                    userId: userId,
+                    registrations: JSON.stringify(regQueue),
+                    status: "pending",
+                    createdAt: new Date()
+                });
+
+                // Store the pending registration ID in session for reference
+                session.setItem("pendingRegId", pendingReg._id);
+
+                console.log("[CRITICAL] ✓ Saved to PendingRegistrations:", pendingReg._id);
+            } catch (saveError) {
+                console.error("[CRITICAL] ✗ Failed to save regQueue to CMS:", saveError);
+                // Log error but continue - we still have session fallback
+                $w("#textError").text = "Warning: Could not save registration backup. Please contact support if payment completes without registration.";
+                safeShow("#textError");
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+        }
+
         // ───── STEP 1: Add registration to cart FIRST (your existing logic)
         $w("#textStatus").text = "Preparing your registration...";
         safeShow("#textStatus");
