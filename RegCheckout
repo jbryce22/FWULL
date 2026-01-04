@@ -131,10 +131,12 @@ $w("#buttonPay").onClick(async () => {
                     throw new Error("User not logged in - cannot save registration");
                 }
 
-                // Save to PendingRegistrations collection (IMMUTABLE - never updated)
+                // Save to PendingRegistrations collection
+                // IMMUTABLE: registrations field never updated, only status field
                 const pendingReg = await wixData.insert("PendingRegistrations", {
                     userId: userId,
                     registrations: JSON.stringify(regQueue),
+                    status: "pending",
                     createdAt: new Date()
                 });
 

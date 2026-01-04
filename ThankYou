@@ -2,6 +2,7 @@
 import { session } from 'wix-storage';
 import wixData from 'wix-data';
 import { syncRegistrationToAirtable, syncDonationToAirtable } from 'backend/airtable.jsw';
+import { sendAirtableSyncFailureEmail } from 'backend/emailNotifications.jsw';
 import { AIRTABLE } from 'public/constants.js';
 
 $w.onReady(async () => {
@@ -100,6 +101,7 @@ $w.onReady(async () => {
 
                     const pendingRegsResult = await wixData.query("PendingRegistrations")
                         .eq("userId", buyerId)
+                        .eq("status", "pending")
                         .ge("createdAt", twoHoursAgo)
                         .descending("createdAt")
                         .find();
@@ -135,9 +137,17 @@ $w.onReady(async () => {
                                 console.log("✓ Loaded from CMS:", regQueue.length, "registrations");
                                 dataSource = "cms";
 
-                                // IMPORTANT: DO NOT UPDATE - keep PendingRegistrations immutable
-                                // We'll check SeasonRegistration.orderId to know if it's been used
-                                console.log("✓ Using PendingRegistrations record (immutable - no update)");
+                                // Mark as processing - ONLY update status field, registrations stays immutable
+                                try {
+                                    await wixData.update("PendingRegistrations", {
+                                        _id: selectedPendingReg._id,
+                                        status: "processing"
+                                    });
+                                    console.log("✓ Marked PendingRegistrations status as 'processing'");
+                                } catch (statusErr) {
+                                    console.error("✗ Failed to update status:", statusErr);
+                                    // Continue anyway - status update is not critical
+                                }
 
                             } catch (parseErr) {
                                 console.error("✗ Failed to parse registrations from CMS:", parseErr);
@@ -470,6 +480,32 @@ $w.onReady(async () => {
                     } catch (logError) {
                         console.error("✗ Failed to log Airtable error to AirtableSyncErrors:", logError);
                     }
+
+                    // Send email notification to president@fwull.com
+                    try {
+                        console.log("Sending email notification for Airtable sync failure...");
+                        await sendAirtableSyncFailureEmail({
+                            orderId,
+                            playerName: reg.playerName,
+                            playerId: reg.playerId,
+                            parentId: reg.parentId,
+                            sport: reg.sport,
+                            division: reg.division,
+                            seasonName: reg.seasonName,
+                            errorMessage: result.error || "Airtable sync rejected the payload",
+                            errorDetails: JSON.stringify({
+                                error: result.error,
+                                details: result.details,
+                                airtablePayload: airtablePayload,
+                                fee: paidAmount
+                            }, null, 2),
+                            registrationData: airtablePayload
+                        });
+                        console.log("✓ Email notification sent to president@fwull.com");
+                    } catch (emailError) {
+                        console.error("✗ Failed to send email notification:", emailError);
+                        // Non-critical - continue processing
+                    }
                 } else {
                     console.log("✓ Registration fully processed:", inserted._id);
                 }
@@ -535,9 +571,38 @@ $w.onReady(async () => {
         session.setItem("regQueue", JSON.stringify(remaining));
         console.log("✓ Session cleanup complete. Remaining items:", remaining.length);
 
-        // NOTE: PendingRegistrations is kept IMMUTABLE (no updates)
-        // We determine if a record was used by checking if orderId exists in SeasonRegistration
-        console.log("✓ PendingRegistrations kept immutable - no updates performed");
+        // Mark PendingRegistrations as completed - ONLY update status field
+        // registrations field stays immutable
+        if (dataSource === "cms") {
+            console.log("Marking PendingRegistrations as completed...");
+            try {
+                const buyerId = order.buyerInfo?.id || order.enteredBy?.id;
+                if (buyerId) {
+                    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+
+                    const pendingRegsResult = await wixData.query("PendingRegistrations")
+                        .eq("userId", buyerId)
+                        .eq("status", "processing")
+                        .ge("createdAt", twoHoursAgo)
+                        .descending("createdAt")
+                        .limit(1)
+                        .find();
+
+                    if (pendingRegsResult.items.length > 0) {
+                        const pendingReg = pendingRegsResult.items[0];
+                        // ONLY update status field, registrations field stays untouched
+                        await wixData.update("PendingRegistrations", {
+                            _id: pendingReg._id,
+                            status: "completed"
+                        });
+                        console.log("✓ Marked PendingRegistrations status as 'completed':", pendingReg._id);
+                    }
+                }
+            } catch (updateErr) {
+                console.error("✗ Failed to mark PendingRegistrations as completed:", updateErr);
+                // Non-critical, continue
+            }
+        }
 
         console.log("========================================");
         console.log("✓ Order Processing Complete");

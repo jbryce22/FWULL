@@ -1,0 +1,119 @@
+// backend/emailNotifications.jsw
+import { triggeredEmails } from 'wix-crm-backend';
+
+/**
+ * Send email notification for Airtable sync failure
+ * @param {Object} failureData - The registration data that failed to sync
+ * @returns {Promise<Object>} - Result of email send
+ */
+export async function sendAirtableSyncFailureEmail(failureData) {
+    try {
+        console.log("[Email] Sending Airtable sync failure notification");
+
+        const {
+            orderId,
+            playerName,
+            playerId,
+            parentId,
+            sport,
+            division,
+            seasonName,
+            errorMessage,
+            errorDetails,
+            registrationData
+        } = failureData;
+
+        // Format the email body with full details
+        const emailBody = `
+AIRTABLE SYNC FAILURE ALERT
+
+A registration failed to sync to Airtable. Please review and manually sync if needed.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REGISTRATION DETAILS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Order ID: ${orderId || 'N/A'}
+Player Name: ${playerName || 'N/A'}
+Player ID: ${playerId || 'N/A'}
+Parent ID: ${parentId || 'N/A'}
+
+Sport: ${sport || 'N/A'}
+Division: ${division || 'N/A'}
+Season: ${seasonName || 'N/A'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ERROR INFORMATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Error Message: ${errorMessage || 'Unknown error'}
+
+Timestamp: ${new Date().toISOString()}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FULL REGISTRATION DATA (JSON)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${registrationData ? JSON.stringify(registrationData, null, 2) : 'Not available'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ERROR DETAILS (JSON)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${errorDetails || 'Not available'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Please check the AirtableSyncErrors collection for more details.
+You may need to manually create this registration in Airtable.
+        `.trim();
+
+        // Send email using Wix CRM
+        const emailId = "airtable_sync_failure"; // You'll need to create this email template in Wix
+
+        const result = await triggeredEmails.emailContact(emailId, "president@fwull.com", {
+            variables: {
+                orderId: orderId || 'N/A',
+                playerName: playerName || 'N/A',
+                division: division || 'N/A',
+                errorMessage: errorMessage || 'Unknown error',
+                fullDetails: emailBody
+            }
+        });
+
+        console.log("[Email] ✓ Airtable sync failure email sent successfully");
+        return { success: true, result };
+
+    } catch (error) {
+        console.error("[Email] ✗ Failed to send Airtable sync failure email:", error);
+        return {
+            success: false,
+            error: error.toString(),
+            message: "Failed to send email notification"
+        };
+    }
+}
+
+/**
+ * Fallback: Send simple email notification without triggered email template
+ * Uses direct email sending if triggered emails aren't configured
+ */
+export async function sendSimpleFailureEmail(failureData) {
+    try {
+        // This is a fallback - you may need to configure Wix email settings
+        console.log("[Email] Sending simple failure notification");
+        console.log("[Email] Failure data:", JSON.stringify(failureData, null, 2));
+
+        // For now, just log - actual email sending requires Wix triggered email setup
+        console.log("[Email] ✓ Failure logged (email template needs configuration)");
+
+        return {
+            success: true,
+            message: "Logged to console - email template needs configuration"
+        };
+
+    } catch (error) {
+        console.error("[Email] ✗ Failed to send simple email:", error);
+        return { success: false, error: error.toString() };
+    }
+}
