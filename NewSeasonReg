@@ -912,6 +912,46 @@ async function handleRegisterClick() {
             LLChildProtect: checkboxLLChildProtectEl?.checked || false
         };
 
+        // ──────────────────────────────────────────────────────────────────
+        // CRITICAL: Save registration data to CMS IMMEDIATELY
+        // This prevents data loss if session storage fails or checkout errors occur
+        // ──────────────────────────────────────────────────────────────────
+        console.log('[CRITICAL] Saving registration data to newSeasonRegistrationPage CMS...');
+        console.log('[CRITICAL] Registration data:', registrationItem);
+
+        let cmsBackupId = null;
+        try {
+            const cmsBackup = await wixData.insert('newSeasonRegistrationPage', {
+                ...registrationItem,
+                status: 'form_submitted',
+                submittedAt: new Date(),
+                userId: wixUsers.currentUser.id,
+                userEmail: currentUser.email || '',
+                // Store division registration status for debugging
+                divisionRegistrationStatus: divisionRegistrationStatus || ''
+            });
+
+            cmsBackupId = cmsBackup._id;
+            console.log('[CRITICAL] ✓ Successfully saved to newSeasonRegistrationPage:', cmsBackupId);
+
+            // Store backup ID in session for potential recovery
+            session.setItem('lastRegBackupId', cmsBackupId);
+
+        } catch (cmsError) {
+            console.error('[CRITICAL] ✗ Failed to save registration backup to CMS:', cmsError);
+            console.error('[CRITICAL] Error details:', {
+                message: cmsError.message,
+                stack: cmsError.stack,
+                registrationData: registrationItem
+            });
+
+            // Show warning but allow user to continue
+            // Data will still be saved to session storage
+            safeShow(errorTextId, 'Warning: Backup save failed. Please contact support if issues occur. Continuing...');
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            safeHide(errorTextId);
+        }
+
         // Re-check duplicates
         const duplicateCheck = await checkForDuplicates(
             registrationItem.playerId,
