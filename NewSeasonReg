@@ -915,41 +915,80 @@ async function handleRegisterClick() {
         // ──────────────────────────────────────────────────────────────────
         // CRITICAL: Save registration data to CMS IMMEDIATELY
         // This prevents data loss if session storage fails or checkout errors occur
+        // Implements retry logic for network failures (WDE0055, timeouts)
         // ──────────────────────────────────────────────────────────────────
         console.log('[CRITICAL] Saving registration data to newSeasonRegistrationPage CMS...');
         console.log('[CRITICAL] Registration data:', registrationItem);
 
         let cmsBackupId = null;
-        try {
-            const cmsBackup = await wixData.insert('newSeasonRegistrationPage', {
-                ...registrationItem,
-                status: 'form_submitted',
-                submittedAt: new Date(),
-                userId: wixUsers.currentUser.id,
-                userEmail: currentUser.email || '',
-                // Store division registration status for debugging
-                divisionRegistrationStatus: divisionRegistrationStatus || ''
-            });
+        let cmsSaveSucceeded = false;
 
-            cmsBackupId = cmsBackup._id;
-            console.log('[CRITICAL] ✓ Successfully saved to newSeasonRegistrationPage:', cmsBackupId);
+        // Retry up to 3 times for network errors
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                console.log(`[CRITICAL] CMS save attempt ${attempt}/3...`);
 
-            // Store backup ID in session for potential recovery
-            session.setItem('lastRegBackupId', cmsBackupId);
+                const cmsBackup = await wixData.insert('newSeasonRegistrationPage', {
+                    ...registrationItem,
+                    status: 'form_submitted',
+                    submittedAt: new Date(),
+                    userId: wixUsers.currentUser.id,
+                    userEmail: currentUser.email || '',
+                    // Store division registration status for debugging
+                    divisionRegistrationStatus: divisionRegistrationStatus || '',
+                    // Track retry attempts
+                    saveAttempts: attempt
+                });
 
-        } catch (cmsError) {
-            console.error('[CRITICAL] ✗ Failed to save registration backup to CMS:', cmsError);
-            console.error('[CRITICAL] Error details:', {
-                message: cmsError.message,
-                stack: cmsError.stack,
-                registrationData: registrationItem
-            });
+                cmsBackupId = cmsBackup._id;
+                cmsSaveSucceeded = true;
+                console.log('[CRITICAL] ✓ Successfully saved to newSeasonRegistrationPage:', cmsBackupId);
+                console.log(`[CRITICAL] Save succeeded on attempt ${attempt}`);
 
-            // Show warning but allow user to continue
-            // Data will still be saved to session storage
-            safeShow(errorTextId, 'Warning: Backup save failed. Please contact support if issues occur. Continuing...');
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            safeHide(errorTextId);
+                // Store backup ID in session for potential recovery
+                session.setItem('lastRegBackupId', cmsBackupId);
+
+                break; // Success - exit retry loop
+
+            } catch (cmsError) {
+                console.error(`[CRITICAL] ✗ CMS save attempt ${attempt}/3 failed:`, cmsError);
+                console.error('[CRITICAL] Error details:', {
+                    message: cmsError.message,
+                    errorCode: cmsError.code,
+                    attempt: attempt,
+                    isNetworkError: cmsError.message?.includes('Network Error') ||
+                                   cmsError.message?.includes('WDE0055') ||
+                                   cmsError.message?.includes('timeout'),
+                    stack: cmsError.stack
+                });
+
+                // Check if this is a retryable error
+                const isRetryableError = cmsError.message?.includes('Network Error') ||
+                                        cmsError.message?.includes('WDE0055') ||
+                                        cmsError.message?.includes('timeout') ||
+                                        cmsError.message?.includes('504');
+
+                // If final attempt or non-retryable error, give up
+                if (attempt === 3 || !isRetryableError) {
+                    console.error('[CRITICAL] ✗ All CMS save attempts failed or non-retryable error');
+                    console.error('[CRITICAL] Final error:', {
+                        message: cmsError.message,
+                        registrationData: registrationItem
+                    });
+
+                    // Show warning but allow user to continue
+                    // Data will still be saved to session storage
+                    safeShow(errorTextId, 'Warning: Backup save failed. Please contact support if issues occur. Continuing...');
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    safeHide(errorTextId);
+                    break;
+                }
+
+                // Wait before retry with exponential backoff
+                const waitTime = attempt * 1000; // 1s, 2s
+                console.log(`[CRITICAL] Retrying in ${waitTime}ms...`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
         }
 
         // Re-check duplicates
@@ -964,13 +1003,55 @@ async function handleRegisterClick() {
             return;
         }
 
-        // Fetch fee from Airtable
+        // Fetch fee from Airtable with retry logic for network failures
         let fee = 0;
-        try {
-            const noteRes = await getDivisionNote(division);
-            if (noteRes.success) fee = noteRes.fee || 0;
-        } catch (e) {
-            console.error('[Register] Failed to fetch division fee:', e);
+        let feeRetrieved = false;
+
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                console.log(`[Register] Fetching division fee, attempt ${attempt}/3...`);
+                const noteRes = await getDivisionNote(division);
+
+                if (noteRes.success) {
+                    fee = noteRes.fee || 0;
+                    feeRetrieved = true;
+                    console.log(`[Register] ✓ Fee retrieved: $${fee} (attempt ${attempt})`);
+                    break;
+                }
+            } catch (e) {
+                console.error(`[Register] ✗ Fee fetch attempt ${attempt}/3 failed:`, e);
+                console.error('[Register] Error details:', {
+                    message: e.message,
+                    statusCode: e.response?.status,
+                    attempt: attempt
+                });
+
+                // Check if this is a retryable error (network, timeout, 5xx)
+                const isRetryableError = e.message?.includes('Network Error') ||
+                                        e.message?.includes('timeout') ||
+                                        e.message?.includes('504') ||
+                                        e.message?.includes('503') ||
+                                        e.message?.includes('502') ||
+                                        e.response?.status >= 500;
+
+                // If final attempt or non-retryable error, give up
+                if (attempt === 3 || !isRetryableError) {
+                    console.error('[Register] ✗ Failed to fetch division fee - using $0');
+                    fee = 0;
+                    break;
+                }
+
+                // Wait before retry with exponential backoff
+                const waitTime = attempt * 1000; // 1s, 2s
+                console.log(`[Register] Retrying fee fetch in ${waitTime}ms...`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
+        }
+
+        if (!feeRetrieved) {
+            console.warn('[Register] ⚠ WARNING: Fee could not be retrieved - defaulting to $0');
+            console.warn('[Register] Division:', division);
+            console.warn('[Register] User should verify correct amount before payment');
         }
 
         let regQueue = [];
