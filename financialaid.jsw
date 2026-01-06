@@ -25,45 +25,172 @@ const F = {
     income: "fld8NgjTOz6JkXQgY",
     comfortPercent: "fldndmRz4dPYLFsRu",
     phone: "fld8i5tPL2leYtAEd"
-
 };
 
+/**
+ * Submit financial aid application to Airtable with retry logic
+ * Implements retry for network failures (504, timeouts, network errors)
+ *
+ * @param {Object} formData - Form data from Wix form submission
+ * @returns {Object} - { success: boolean, id?: string, error?: object }
+ */
 export async function submitFinancialAid(formData) {
-    const token = await getSecret("AIRTABLE_TOKEN");
+    console.log('[Financial Aid] Starting submission to Airtable...');
+    console.log('[Financial Aid] Form data received:', {
+        email: formData.your_email,
+        hasFirstName: !!formData.full_name,
+        hasLastName: !!formData.last_name_d9d6,
+        hasPhone: !!formData.your_phone_number
+    });
+
+    // Validate required fields
+    if (!formData.your_email) {
+        console.error('[Financial Aid] ✗ Validation failed: Missing email');
+        return {
+            success: false,
+            error: { message: 'Email is required', code: 'VALIDATION_ERROR' }
+        };
+    }
+
+    if (!formData.full_name || !formData.last_name_d9d6) {
+        console.error('[Financial Aid] ✗ Validation failed: Missing name');
+        return {
+            success: false,
+            error: { message: 'Full name is required', code: 'VALIDATION_ERROR' }
+        };
+    }
+
+    // Get Airtable token
+    let token;
+    try {
+        token = await getSecret("AIRTABLE_TOKEN");
+        console.log('[Financial Aid] ✓ Airtable token retrieved');
+    } catch (err) {
+        console.error('[Financial Aid] ✗ Failed to retrieve Airtable token:', err);
+        return {
+            success: false,
+            error: { message: 'Configuration error', code: 'TOKEN_ERROR' }
+        };
+    }
+
     const url = `https://api.airtable.com/v0/${BASE}/${TABLE}`;
 
+    // Map form fields to Airtable fields
     const fields = {
-        [F.firstname]: formData.full_name,
-        [F.lastname]: formData.last_name_d9d6,
-        [F.email]: formData.your_email,
-        [F.phone]: formData.your_phone_number,
-        [F.address]: formData.your_address,
+        [F.firstname]: formData.full_name || '',
+        [F.lastname]: formData.last_name_d9d6 || '',
+        [F.email]: formData.your_email || '',
+        [F.phone]: formData.your_phone_number || '',
+        [F.address]: formData.your_address || '',
         [F.kidsTotal]: Number(formData.how_many_children_in_your_household || 0),
         [F.kidsBaseball]: Number(formData.how_many_children_in_your_household_are_you_registering_to_pla_1 || 0),
         [F.kidsSoftball]: Number(formData.how_many_children_in_your_household_are_you_interested_in_regi_1 || 0),
-        [F.playerNames]: formData.names_of_the_player_s_you_are_registering,
-        [F.description]: formData.please_briefly_describe_your_situation_and_why_you_are_requestin,
-        [F.comfortPercent]: formData.what_of_the_registration_fee_do_you_feel_comfortable_paying_1,
+        [F.playerNames]: formData.names_of_the_player_s_you_are_registering || '',
+        [F.description]: formData.please_briefly_describe_your_situation_and_why_you_are_requestin || '',
+        [F.comfortPercent]: formData.what_of_the_registration_fee_do_you_feel_comfortable_paying_1 || '',
         [F.adultsHousehold]: Number(formData.how_many_adults_in_your_household_including_yourself || 0),
-        [F.adultsEmployed]: Number(formData.how_many_adults_in_your_household_are_currently_employed || 0),   
-        [F.income]: formData.annual_household_income,   
+        [F.adultsEmployed]: Number(formData.how_many_adults_in_your_household_are_currently_employed || 0),
+        [F.income]: formData.annual_household_income || ''
     };
 
-    const response = await fetch(url, {
-        method: "POST",
-        headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ fields })
+    console.log('[Financial Aid] Mapped fields for Airtable:', {
+        email: fields[F.email],
+        firstname: fields[F.firstname],
+        lastname: fields[F.lastname],
+        kidsTotal: fields[F.kidsTotal]
     });
 
-    const json = await response.json();
+    // Retry logic for network failures
+    let lastError = null;
+    const maxAttempts = 3;
 
-    if (!response.ok) {
-        console.error("Airtable Error:", json);
-        return { success: false, error: json };
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            console.log(`[Financial Aid] Airtable POST attempt ${attempt}/${maxAttempts}...`);
+
+            const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ fields })
+            });
+
+            console.log(`[Financial Aid] Response status: ${response.status}`);
+
+            const json = await response.json();
+
+            if (!response.ok) {
+                console.error(`[Financial Aid] ✗ Airtable error response (${response.status}):`, json);
+
+                // Check if retryable error (5xx server errors, rate limits)
+                const isRetryable = response.status >= 500 ||
+                                   response.status === 429 ||
+                                   response.status === 408;
+
+                if (isRetryable && attempt < maxAttempts) {
+                    const waitTime = attempt * 1000; // 1s, 2s
+                    console.log(`[Financial Aid] Retryable error, waiting ${waitTime}ms before retry...`);
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                    lastError = json;
+                    continue;
+                }
+
+                // Non-retryable error or final attempt
+                console.error('[Financial Aid] ✗ Non-retryable error or final attempt failed');
+                return { success: false, error: json, attempt: attempt };
+            }
+
+            // Success!
+            console.log(`[Financial Aid] ✓ SUCCESS - Record created in Airtable on attempt ${attempt}`);
+            console.log(`[Financial Aid] Airtable record ID: ${json.id}`);
+
+            return {
+                success: true,
+                id: json.id,
+                attempt: attempt
+            };
+
+        } catch (err) {
+            console.error(`[Financial Aid] ✗ Attempt ${attempt}/${maxAttempts} threw error:`, err);
+            console.error('[Financial Aid] Error details:', {
+                message: err.message,
+                name: err.name,
+                stack: err.stack
+            });
+
+            lastError = err;
+
+            // Check if retryable error (network, timeout)
+            const isRetryable = err.message?.includes('timeout') ||
+                               err.message?.includes('ETIMEDOUT') ||
+                               err.message?.includes('ECONNRESET') ||
+                               err.message?.includes('Network Error') ||
+                               err.message?.includes('503') ||
+                               err.message?.includes('504');
+
+            if (isRetryable && attempt < maxAttempts) {
+                const waitTime = attempt * 1000; // 1s, 2s
+                console.log(`[Financial Aid] Network error, waiting ${waitTime}ms before retry...`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                continue;
+            }
+
+            // Non-retryable error or final attempt
+            if (attempt === maxAttempts) {
+                console.error('[Financial Aid] ✗ All retry attempts exhausted');
+            }
+        }
     }
 
-    return { success: true, id: json.id };
+    // All attempts failed
+    console.error('[Financial Aid] ✗ FAILED - All attempts to submit to Airtable failed');
+    console.error('[Financial Aid] Last error:', lastError);
+
+    return {
+        success: false,
+        error: lastError || { message: 'Unknown error' },
+        attempts: maxAttempts
+    };
 }
