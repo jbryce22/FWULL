@@ -1,0 +1,506 @@
+// backend/airtableRefactored.jsw
+// Refactored Airtable integration with circuit breaker, better error handling, and cleaner code
+
+import { fetch } from 'wix-fetch';
+import wixSecretsBackend from 'wix-secrets-backend';
+import { loggers } from './logger.jsw';
+import { getCircuitBreaker, retry } from './retryUtils.jsw';
+
+const logger = loggers.airtable;
+
+// ===== CONFIGURATION =====
+
+const CONFIG = {
+    BASE_ID_MAIN: 'appU008DNqprqcBR3',
+    BASE_ID_FINANCIAL_AID: 'appVWHysw4oYfn9Ox',
+
+    TABLES: {
+        DIVISIONS: 'Divisions',
+        REGISTRATIONS: 'All Players By Year',
+        SEASONS: 'Seasons',
+        DONATIONS: 'tblqyQH7WrUViS2zj'
+    }
+};
+
+// ===== FIELD MAPPING =====
+
+const FIELD_MAP = {
+    // Player info
+    playerFirstName: 'fldBQnKkcHQfFsRlE',
+    playerLastName: 'fldKOEUqF5QkTSbpu',
+    _id: 'fldMjkKEIeXzIAEs2',
+    playerId: 'fldr39kcczMXYVQ71',
+
+    // Parent info
+    parentId: 'fldAzIKtVXcvaXpVr',
+    parentFullName: 'fldetv0tcWoxLJ8zA',
+    parentemail: 'flddib8kpwhQayf59',
+    parentcell: 'fldjsSk1PhYi5BOiZ',
+    additionalEmail: 'fld71iEEn5syQvE9M',
+    address: 'fldv51qSwwYW7BgPo',
+
+    // School
+    school: 'fldZBze7shCMpRSwB',
+    schoolOther: 'fldUmzITqG9hdKhwZ',
+
+    // Team parent
+    teamParentName: 'fldANKootbkyScMwO',
+    teamParentEmail: 'fldTkz5xytmx4qwO9',
+    teamParentPhone: 'fldIrdaAv42E4xCQD',
+
+    // Registration details
+    sport: 'fld0qO9VUfvrsiNrd',
+    division: 'fldQCpHIic6EZHwYT',
+    jerseySize: 'fldm3PJS7MzAB30bW',
+    datePaid: 'flduY58laYhhq98qw',
+    playerBirthDate: 'fldOc4ZSrdnQ82585',
+
+    // Emergency contact
+    emergencyContactName: 'fldAWqHo34aGbQgNB',
+    emergencyContactPhone: 'fldzjkNv02gxgGbcb',
+
+    // Requests
+    requestPlayDown: 'fldjkJpZ8wDhP6MxI',
+    coachRequest: 'fldY0RFCRo9mBFveH',
+
+    // Checkboxes
+    MedicalRelease: 'fldas9wUXSieFE9e3',
+    LLChildProtect: 'fldex3H724T4F2ipy',
+    LLPrivacyPolicy: 'fldkzc5WwgHUlNc9q',
+
+    // Volunteer
+    volunteerCoachName: 'fldcxSZcJ2c2tSBdx',
+    volunteerCoachEmail: 'fldWQJ9RX1m0Sjwjw',
+    teamParentVolunteer: 'fldMfAXEBw2ZxdNDt',
+    coachVolunteer: 'fldjajn2crJQuunu0',
+    coachVolunteerType: 'fld8DRQSVJXknOznt',
+    volunteerCoachNumber: 'fldc8HsWuUm60LgLu',
+    inputVolOtherLL: 'fldh2DVeqG7QWRp3x',
+    volunteerCoachPriorHistory: 'fldpgCiv31IAKmYGE',
+    dropdownVolCrimesMinors: 'fldFSDzrTnAWq6v72',
+    dropdownVolPriorCrime: 'fldWeAc5DJNJ53BTL',
+    dropdownVolPending: 'fldOlfCSkzjZExGXO',
+    checkboxVolPrivacyPolicy: 'fldW2slKrJZQoSnV7',
+    checkboxChildProtectionProgram: 'fldjPiNHYYPoL8qw4',
+    checkboxVolunteerApp: 'fldvxJ0viQFGayuIV',
+    priorexperience: 'fld6FHafPZRPWrsI5',
+
+    // Fee
+    fee: 'fld10em0hUD42rIFi',
+
+    // Error notes
+    errorNotes: 'fldbaJSYT7afOF8kq'
+};
+
+// Single-select fields (must have non-empty string values)
+const SINGLE_SELECT_FIELDS = new Set([
+    FIELD_MAP.division,
+    FIELD_MAP.sport,
+    FIELD_MAP.jerseySize,
+    FIELD_MAP.requestPlayDown,
+    FIELD_MAP.teamParentVolunteer,
+    FIELD_MAP.coachVolunteer,
+    FIELD_MAP.coachVolunteerType,
+    FIELD_MAP.volunteerCoachNumber,
+    FIELD_MAP.dropdownVolPending,
+    FIELD_MAP.volunteerCoachPriorHistory,
+    FIELD_MAP.dropdownVolCrimesMinors,
+    FIELD_MAP.dropdownVolPriorCrime
+]);
+
+// Donation field mapping
+const DONATION_FIELDS = {
+    NAME: 'fldgx60BzzeRispfW',
+    AMOUNT: 'fld5xE3IeOhqG30CM',
+    EMAIL: 'fldkYHMpVW5pBJIDA',
+    TYPE: 'fldObFdLCIADbG8EN'
+};
+
+// ===== UTILITIES =====
+
+/**
+ * Get Airtable API token from secrets
+ */
+async function getToken() {
+    const token = await wixSecretsBackend.getSecret('AIRTABLE_TOKEN');
+    if (!token) {
+        throw new Error('Airtable token not configured in secrets');
+    }
+    return token;
+}
+
+/**
+ * Escape single quotes in formula values
+ */
+function escapeFormula(value) {
+    return value ? String(value).replace(/'/g, "\\'") : '';
+}
+
+/**
+ * Clean division name (remove " - YYYY.N" suffix)
+ */
+function cleanDivisionName(fullDivision) {
+    if (!fullDivision) return '';
+    return fullDivision.split(' - ')[0].trim();
+}
+
+/**
+ * Make Airtable API request with circuit breaker
+ */
+async function airtableRequest(url, options = {}) {
+    const circuitBreaker = getCircuitBreaker('airtable');
+
+    return await circuitBreaker.execute(async () => {
+        const token = await getToken();
+
+        const response = await fetch(url, {
+            ...options,
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            const error = new Error(`Airtable API error: ${response.status}`);
+            error.status = response.status;
+            error.data = data;
+            throw error;
+        }
+
+        return data;
+    });
+}
+
+// ===== SEASON LOOKUP =====
+
+/**
+ * Get Airtable season record ID by season name
+ * @param {string} seasonName - Season name (e.g., "2026.1")
+ * @returns {Promise<string|null>} - Airtable season record ID
+ */
+export async function getSeasonRecordId(seasonName) {
+    if (!seasonName) return null;
+
+    try {
+        logger.debug('Looking up season record', { seasonName });
+
+        const url = `https://api.airtable.com/v0/${CONFIG.BASE_ID_MAIN}/${CONFIG.TABLES.SEASONS}` +
+            `?filterByFormula=({SeasonName}='${escapeFormula(seasonName)}')`;
+
+        const data = await airtableRequest(url);
+
+        if (!data.records || data.records.length === 0) {
+            logger.warn('Season not found in Airtable', { seasonName });
+            return null;
+        }
+
+        const recordId = data.records[0].id;
+        logger.debug('Season record found', { seasonName, recordId });
+
+        return recordId;
+
+    } catch (error) {
+        logger.error('Failed to lookup season', error, { seasonName });
+        return null;
+    }
+}
+
+// ===== DIVISION LOOKUP =====
+
+/**
+ * Get division information from Airtable
+ * @param {string} divisionName - Division name
+ * @returns {Promise<Object>} - Division info
+ */
+export async function getDivisionNote(divisionName) {
+    if (!divisionName) {
+        return {
+            success: false,
+            error: 'No division name provided'
+        };
+    }
+
+    try {
+        logger.debug('Looking up division info', { divisionName });
+
+        const url = `https://api.airtable.com/v0/${CONFIG.BASE_ID_MAIN}/${CONFIG.TABLES.DIVISIONS}` +
+            `?filterByFormula=({Division and Year}='${escapeFormula(divisionName)}')`;
+
+        const data = await airtableRequest(url);
+
+        if (!data.records || data.records.length === 0) {
+            logger.warn('Division not found', { divisionName });
+
+            return {
+                success: true,
+                note: 'No division details found.',
+                fee: 0,
+                playDownEligible: false,
+                coachRequestEligible: false,
+                registrationStatus: ''
+            };
+        }
+
+        const fields = data.records[0].fields;
+
+        // Get registration status (try by name first, then by field ID)
+        const rawStatus = fields['Registration Status'] || fields['fld1X55tPkcILV83i'] || '';
+        const registrationStatus = Array.isArray(rawStatus)
+            ? String(rawStatus[0] || '').trim()
+            : String(rawStatus || '').trim();
+
+        logger.debug('Division info retrieved', {
+            divisionName,
+            fee: fields['Registration Fee'],
+            status: registrationStatus
+        });
+
+        return {
+            success: true,
+            note: fields['Division Specific Note'] || '',
+            fee: fields['Registration Fee'] || 0,
+            playDownEligible: fields['Play Down Eligible Division?'] === 'Yes',
+            coachRequestEligible: fields['Coach Request Eligible Division?'] === 'Yes',
+            registrationStatus
+        };
+
+    } catch (error) {
+        logger.error('Failed to get division info', error, { divisionName });
+
+        return {
+            success: false,
+            error: error.message || error.toString()
+        };
+    }
+}
+
+// ===== REGISTRATION SYNC =====
+
+/**
+ * Check if registration already exists in Airtable
+ */
+async function checkDuplicateInAirtable(cmsId) {
+    if (!cmsId) return false;
+
+    try {
+        const url = `https://api.airtable.com/v0/${CONFIG.BASE_ID_MAIN}/${CONFIG.TABLES.REGISTRATIONS}` +
+            `?filterByFormula=({${FIELD_MAP._id}}='${escapeFormula(cmsId)}')`;
+
+        const data = await airtableRequest(url);
+
+        return data.records && data.records.length > 0;
+
+    } catch (error) {
+        logger.warn('Duplicate check failed, proceeding with insert', { cmsId, error: error.message });
+        return false; // Assume not duplicate if check fails
+    }
+}
+
+/**
+ * Map CMS registration to Airtable fields
+ */
+function mapRegistrationFields(registration) {
+    const fields = {};
+    const errorNotes = [];
+
+    // Process each field
+    for (const [cmsKey, value] of Object.entries(registration)) {
+        const airtableFieldId = FIELD_MAP[cmsKey];
+
+        if (!airtableFieldId) {
+            errorNotes.push(`Unknown field: ${cmsKey}`);
+            continue;
+        }
+
+        let processedValue = value;
+
+        // Special processing for specific fields
+        if (cmsKey === 'division') {
+            processedValue = cleanDivisionName(value);
+        }
+        else if (cmsKey === 'fee') {
+            processedValue = Number(value || 0);
+        }
+        else if (cmsKey === 'playerBirthDate' || cmsKey === 'datePaid') {
+            if (value) {
+                const date = new Date(value);
+                if (isNaN(date.getTime())) {
+                    errorNotes.push(`Invalid date for ${cmsKey}: ${value}`);
+                    continue;
+                }
+                processedValue = date;
+            } else {
+                processedValue = null;
+            }
+        }
+
+        // Validate single-select fields
+        if (SINGLE_SELECT_FIELDS.has(airtableFieldId)) {
+            if (!processedValue || String(processedValue).trim() === '') {
+                errorNotes.push(`Single-select field '${cmsKey}' is empty`);
+                continue;
+            }
+        }
+
+        // Convert null/undefined to empty string for text fields
+        if (processedValue === null || processedValue === undefined) {
+            processedValue = '';
+        }
+
+        fields[airtableFieldId] = processedValue;
+    }
+
+    return { fields, errorNotes };
+}
+
+/**
+ * Sync registration to Airtable
+ * @param {Object} registration - CMS registration record
+ * @returns {Promise<Object>} - Sync result
+ */
+export async function syncRegistrationToAirtable(registration) {
+    try {
+        logger.info('Starting Airtable sync', {
+            registrationId: registration._id,
+            playerId: registration.playerId,
+            playerName: `${registration.playerFirstName} ${registration.playerLastName}`
+        });
+
+        // Check for duplicate
+        const isDuplicate = await checkDuplicateInAirtable(registration._id);
+
+        if (isDuplicate) {
+            logger.info('Duplicate prevented in Airtable', {
+                registrationId: registration._id
+            });
+
+            return {
+                success: true,
+                duplicate: true,
+                message: 'Record already exists in Airtable'
+            };
+        }
+
+        // Map fields
+        const { fields, errorNotes } = mapRegistrationFields(registration);
+
+        // Link to season
+        const seasonRecordId = await getSeasonRecordId(registration.seasonName);
+
+        if (seasonRecordId) {
+            fields['Seasons'] = [seasonRecordId];
+        } else if (registration.seasonName) {
+            errorNotes.push(`No season match found for: ${registration.seasonName}`);
+        }
+
+        // Add error notes if any
+        if (errorNotes.length > 0) {
+            fields[FIELD_MAP.errorNotes] = errorNotes.join('\n');
+        }
+
+        logger.debug('Mapped fields for Airtable', {
+            fieldCount: Object.keys(fields).length,
+            hasErrors: errorNotes.length > 0
+        });
+
+        // Insert to Airtable with retry
+        const url = `https://api.airtable.com/v0/${CONFIG.BASE_ID_MAIN}/${CONFIG.TABLES.REGISTRATIONS}`;
+
+        const result = await retry(
+            () => airtableRequest(url, {
+                method: 'POST',
+                body: JSON.stringify({ records: [{ fields }] })
+            }),
+            {
+                maxAttempts: 3,
+                baseDelay: 2000,
+                operationName: `Airtable sync for ${registration.playerFirstName} ${registration.playerLastName}`
+            }
+        );
+
+        logger.info('Airtable sync successful', {
+            registrationId: registration._id,
+            airtableId: result.records[0].id
+        });
+
+        return {
+            success: true,
+            result,
+            airtableId: result.records[0].id
+        };
+
+    } catch (error) {
+        logger.error('Airtable sync failed', error, {
+            registrationId: registration._id,
+            playerId: registration.playerId
+        });
+
+        return {
+            success: false,
+            error: error.message || error.toString(),
+            details: error.data || null
+        };
+    }
+}
+
+// ===== DONATION SYNC =====
+
+/**
+ * Sync donation to Airtable
+ * @param {Object} donation - Donation data
+ * @returns {Promise<Object>} - Sync result
+ */
+export async function syncDonationToAirtable(donation) {
+    try {
+        logger.info('Syncing donation to Airtable', {
+            donorName: donation['Your Name'],
+            amount: donation['Donation Amount']
+        });
+
+        const fields = {
+            [DONATION_FIELDS.NAME]: donation['Your Name'] || '',
+            [DONATION_FIELDS.AMOUNT]: Number(donation['Donation Amount'] || 0),
+            [DONATION_FIELDS.EMAIL]: donation['Your Email'] || '',
+            [DONATION_FIELDS.TYPE]: donation['fldObFdLCIADbG8EN'] || 'Donation at Registration'
+        };
+
+        const url = `https://api.airtable.com/v0/${CONFIG.BASE_ID_FINANCIAL_AID}/${CONFIG.TABLES.DONATIONS}`;
+
+        const result = await retry(
+            () => airtableRequest(url, {
+                method: 'POST',
+                body: JSON.stringify({ records: [{ fields }] })
+            }),
+            {
+                maxAttempts: 3,
+                baseDelay: 2000,
+                operationName: `Donation sync for ${donation['Your Name']}`
+            }
+        );
+
+        logger.info('Donation sync successful', {
+            donorName: donation['Your Name'],
+            airtableId: result.records[0].id
+        });
+
+        return {
+            success: true,
+            result,
+            airtableId: result.records[0].id
+        };
+
+    } catch (error) {
+        logger.error('Donation sync failed', error, {
+            donorName: donation['Your Name']
+        });
+
+        return {
+            success: false,
+            error: error.message || error.toString()
+        };
+    }
+}
