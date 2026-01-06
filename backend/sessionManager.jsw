@@ -1,0 +1,265 @@
+// backend/sessionManager.jsw
+// Session storage management utilities (client-side only)
+// Note: This is imported in page code, not backend
+
+import { session } from 'wix-storage';
+import { loggers } from 'backend/logger.jsw';
+
+const logger = loggers.session;
+
+/**
+ * Session keys for organized storage
+ */
+export const SessionKeys = {
+    REG_QUEUE: 'regQueue',
+    LAST_REG_BACKUP_ID: 'lastRegBackupId',
+    PENDING_REG_ID: 'pendingRegId',
+    DONATION_SYNCED: 'donationSynced',
+    ORDER_PROCESSED: 'orderProcessed_', // Prefix for order IDs
+    ORDER_PROCESSING: 'orderProcessing_' // Prefix for order IDs (lock)
+};
+
+/**
+ * Get registration queue from session
+ * @returns {Array} - Array of registration objects
+ */
+export function getRegQueue() {
+    try {
+        const rawQueue = session.getItem(SessionKeys.REG_QUEUE);
+        const queue = JSON.parse(rawQueue || '[]');
+
+        logger.debug(`Retrieved ${queue.length} registrations from session`);
+
+        return Array.isArray(queue) ? queue : [];
+    } catch (error) {
+        logger.error('Failed to parse regQueue from session', error);
+        return [];
+    }
+}
+
+/**
+ * Set registration queue in session
+ * @param {Array} queue - Array of registration objects
+ */
+export function setRegQueue(queue) {
+    try {
+        if (!Array.isArray(queue)) {
+            throw new Error('Queue must be an array');
+        }
+
+        session.setItem(SessionKeys.REG_QUEUE, JSON.stringify(queue));
+
+        logger.debug(`Stored ${queue.length} registrations in session`);
+    } catch (error) {
+        logger.error('Failed to store regQueue in session', error);
+        throw error;
+    }
+}
+
+/**
+ * Add registration to queue
+ * @param {Object} registration - Registration object to add
+ * @returns {Array} - Updated queue
+ */
+export function addToRegQueue(registration) {
+    const queue = getRegQueue();
+    queue.push(registration);
+    setRegQueue(queue);
+
+    logger.info('Added registration to queue', {
+        playerId: registration.playerId,
+        playerName: registration.playerName,
+        queueLength: queue.length
+    });
+
+    return queue;
+}
+
+/**
+ * Remove registration from queue by index
+ * @param {number} index - Index of registration to remove
+ * @returns {Array} - Updated queue
+ */
+export function removeFromRegQueue(index) {
+    const queue = getRegQueue();
+
+    if (index < 0 || index >= queue.length) {
+        logger.warn('Attempted to remove invalid index from queue', { index, queueLength: queue.length });
+        return queue;
+    }
+
+    const removed = queue.splice(index, 1)[0];
+    setRegQueue(queue);
+
+    logger.info('Removed registration from queue', {
+        playerId: removed?.playerId,
+        playerName: removed?.playerName,
+        index,
+        queueLength: queue.length
+    });
+
+    return queue;
+}
+
+/**
+ * Clear registration queue
+ */
+export function clearRegQueue() {
+    session.setItem(SessionKeys.REG_QUEUE, '[]');
+    logger.info('Cleared registration queue');
+}
+
+/**
+ * Check if registration is duplicate in queue
+ * @param {Object} registration - Registration to check
+ * @returns {boolean} - True if duplicate exists
+ */
+export function isDuplicateInQueue(registration) {
+    const queue = getRegQueue();
+
+    const duplicate = queue.some(r =>
+        r.playerId === registration.playerId &&
+        r.seasonName === registration.seasonName &&
+        r.sport === registration.sport
+    );
+
+    if (duplicate) {
+        logger.warn('Duplicate registration detected in queue', {
+            playerId: registration.playerId,
+            playerName: registration.playerName,
+            seasonName: registration.seasonName,
+            sport: registration.sport
+        });
+    }
+
+    return duplicate;
+}
+
+/**
+ * Get backup registration ID
+ */
+export function getLastRegBackupId() {
+    return session.getItem(SessionKeys.LAST_REG_BACKUP_ID);
+}
+
+/**
+ * Set backup registration ID
+ */
+export function setLastRegBackupId(id) {
+    session.setItem(SessionKeys.LAST_REG_BACKUP_ID, id);
+    logger.debug('Set last reg backup ID', { id });
+}
+
+/**
+ * Get pending registration ID (from checkout)
+ */
+export function getPendingRegId() {
+    return session.getItem(SessionKeys.PENDING_REG_ID);
+}
+
+/**
+ * Set pending registration ID (from checkout)
+ */
+export function setPendingRegId(id) {
+    session.setItem(SessionKeys.PENDING_REG_ID, id);
+    logger.debug('Set pending reg ID', { id });
+}
+
+/**
+ * Check if donation has been synced
+ */
+export function isDonationSynced() {
+    return session.getItem(SessionKeys.DONATION_SYNCED) === 'yes';
+}
+
+/**
+ * Mark donation as synced
+ */
+export function setDonationSynced() {
+    session.setItem(SessionKeys.DONATION_SYNCED, 'yes');
+    logger.debug('Marked donation as synced');
+}
+
+/**
+ * Clear donation synced flag
+ */
+export function clearDonationSynced() {
+    session.removeItem(SessionKeys.DONATION_SYNCED);
+    logger.debug('Cleared donation synced flag');
+}
+
+/**
+ * Acquire processing lock for order
+ * @param {string} orderId - Order ID
+ * @returns {boolean} - True if lock acquired, false if already locked
+ */
+export function acquireProcessingLock(orderId) {
+    const lockKey = `${SessionKeys.ORDER_PROCESSING}${orderId}`;
+    const processedKey = `${SessionKeys.ORDER_PROCESSED}${orderId}`;
+
+    // Check if already processed
+    if (session.getItem(processedKey) === 'true') {
+        logger.warn('Order already processed', { orderId });
+        return false;
+    }
+
+    // Check if currently processing
+    if (session.getItem(lockKey) === 'true') {
+        logger.warn('Order currently being processed', { orderId });
+        return false;
+    }
+
+    // Acquire lock
+    session.setItem(lockKey, 'true');
+    logger.info('Processing lock acquired', { orderId });
+
+    return true;
+}
+
+/**
+ * Release processing lock for order
+ * @param {string} orderId - Order ID
+ */
+export function releaseProcessingLock(orderId) {
+    const lockKey = `${SessionKeys.ORDER_PROCESSING}${orderId}`;
+    session.removeItem(lockKey);
+
+    logger.info('Processing lock released', { orderId });
+}
+
+/**
+ * Mark order as processed
+ * @param {string} orderId - Order ID
+ */
+export function markOrderProcessed(orderId) {
+    const lockKey = `${SessionKeys.ORDER_PROCESSING}${orderId}`;
+    const processedKey = `${SessionKeys.ORDER_PROCESSED}${orderId}`;
+
+    // Release lock and mark as processed
+    session.removeItem(lockKey);
+    session.setItem(processedKey, 'true');
+
+    logger.info('Order marked as processed', { orderId });
+}
+
+/**
+ * Check if order has been processed
+ * @param {string} orderId - Order ID
+ * @returns {boolean} - True if already processed
+ */
+export function isOrderProcessed(orderId) {
+    const processedKey = `${SessionKeys.ORDER_PROCESSED}${orderId}`;
+    return session.getItem(processedKey) === 'true';
+}
+
+/**
+ * Clear all session data (for logout or reset)
+ */
+export function clearAllSessionData() {
+    clearRegQueue();
+    session.removeItem(SessionKeys.LAST_REG_BACKUP_ID);
+    session.removeItem(SessionKeys.PENDING_REG_ID);
+    clearDonationSynced();
+
+    logger.info('All session data cleared');
+}

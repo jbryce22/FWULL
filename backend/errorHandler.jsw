@@ -1,0 +1,314 @@
+// backend/errorHandler.jsw
+// Centralized error handling and logging to CMS
+
+import wixData from 'wix-data';
+import { loggers } from './logger.jsw';
+import { sendAirtableSyncFailureEmail, sendRegistrationDataLostEmail } from './emailNotifications.jsw';
+
+const logger = loggers.system;
+
+/**
+ * Error types for categorization
+ */
+export const ErrorType = {
+    AIRTABLE_SYNC_FAILED: 'AIRTABLE_SYNC_FAILED',
+    CMS_INSERT_FAILED: 'CMS_INSERT_FAILED',
+    CMS_RETRIEVAL_FAILED: 'CMS_RETRIEVAL_FAILED',
+    NO_REGISTRATION_DATA: 'NO_REGISTRATION_DATA',
+    DONATION_SYNC_FAILED: 'DONATION_SYNC_FAILED',
+    DUPLICATE_PREVENTED: 'DUPLICATE_PREVENTED',
+    VALIDATION_FAILED: 'VALIDATION_FAILED',
+    PAYMENT_FAILED: 'PAYMENT_FAILED',
+    NETWORK_ERROR: 'NETWORK_ERROR',
+    UNEXPECTED_ERROR: 'UNEXPECTED_ERROR'
+};
+
+/**
+ * Error severity levels
+ */
+export const ErrorSeverity = {
+    LOW: 'LOW',           // Minor issue, no user impact
+    MEDIUM: 'MEDIUM',     // User can continue, but with degraded experience
+    HIGH: 'HIGH',         // Feature failure, user cannot proceed
+    CRITICAL: 'CRITICAL'  // Data loss risk, payment without registration, etc.
+};
+
+/**
+ * Log error to CMS AirtableSyncErrors collection
+ * @param {Object} errorData - Error information
+ * @returns {Promise<Object>} - Result of CMS insert
+ */
+export async function logErrorToCMS(errorData) {
+    try {
+        const {
+            orderId = null,
+            registrationId = null,
+            playerName = 'Unknown',
+            playerId = null,
+            parentId = null,
+            sport = 'N/A',
+            division = 'Unknown',
+            seasonName = 'N/A',
+            errorType = ErrorType.UNEXPECTED_ERROR,
+            errorMessage = 'Unknown error',
+            errorDetails = {},
+            severity = ErrorSeverity.MEDIUM
+        } = errorData;
+
+        // Build CMS record
+        const errorRecord = {
+            orderId,
+            registrationId,
+            playerName,
+            playerId,
+            parentId,
+            sport,
+            division,
+            seasonName,
+            errorType,
+            errorMessage,
+            errorDetails: typeof errorDetails === 'string'
+                ? errorDetails
+                : JSON.stringify(errorDetails, null, 2),
+            errorTimestamp: new Date(),
+            severity
+        };
+
+        logger.debug('Logging error to CMS', errorRecord);
+
+        const result = await wixData.insert('AirtableSyncErrors', errorRecord);
+
+        logger.info('Error logged to CMS successfully', { _id: result._id, errorType });
+
+        return { success: true, result };
+
+    } catch (error) {
+        logger.critical('Failed to log error to CMS', error, errorData);
+
+        // Don't throw - we don't want error logging to crash the application
+        return { success: false, error: error.toString() };
+    }
+}
+
+/**
+ * Handle Airtable sync failure
+ * - Log to CMS
+ * - Send email notification
+ * - Return structured error response
+ */
+export async function handleAirtableSyncFailure(registrationData, syncError) {
+    const errorData = {
+        orderId: registrationData.orderId || null,
+        registrationId: registrationData._id || null,
+        playerName: registrationData.playerName || 'Unknown',
+        playerId: registrationData.playerId || null,
+        parentId: registrationData.parentId || null,
+        sport: registrationData.sport || 'N/A',
+        division: registrationData.division || 'Unknown',
+        seasonName: registrationData.seasonName || 'N/A',
+        errorType: ErrorType.AIRTABLE_SYNC_FAILED,
+        errorMessage: syncError.message || syncError.toString(),
+        errorDetails: {
+            error: syncError.toString(),
+            stack: syncError.stack,
+            registrationData,
+            timestamp: new Date().toISOString()
+        },
+        severity: ErrorSeverity.MEDIUM // Data in CMS, just not in Airtable
+    };
+
+    logger.error('Airtable sync failed', syncError, {
+        playerId: registrationData.playerId,
+        playerName: registrationData.playerName,
+        orderId: registrationData.orderId
+    });
+
+    // Log to CMS
+    await logErrorToCMS(errorData);
+
+    // Send email notification (non-blocking)
+    sendAirtableSyncFailureEmail({
+        ...errorData,
+        registrationData
+    }).catch(emailError => {
+        logger.error('Failed to send Airtable sync failure email', emailError);
+    });
+
+    return {
+        success: false,
+        errorType: ErrorType.AIRTABLE_SYNC_FAILED,
+        message: 'Failed to sync registration to Airtable (data saved to CMS)',
+        logged: true
+    };
+}
+
+/**
+ * Handle CMS insert failure (critical - payment may have been collected)
+ */
+export async function handleCMSInsertFailure(registrationData, cmsError, orderId = null) {
+    const errorData = {
+        orderId,
+        registrationId: null, // No registration created
+        playerName: registrationData.playerName || 'Unknown',
+        playerId: registrationData.playerId || null,
+        parentId: registrationData.parentId || null,
+        sport: registrationData.sport || 'N/A',
+        division: registrationData.division || 'Unknown',
+        seasonName: registrationData.seasonName || 'N/A',
+        errorType: ErrorType.CMS_INSERT_FAILED,
+        errorMessage: `CMS insert failed: ${cmsError.message || cmsError.toString()}`,
+        errorDetails: {
+            error: cmsError.toString(),
+            stack: cmsError.stack,
+            registrationData,
+            orderId,
+            timestamp: new Date().toISOString()
+        },
+        severity: ErrorSeverity.CRITICAL // Payment collected, but registration not saved
+    };
+
+    logger.critical('CMS insert failed', cmsError, {
+        playerId: registrationData.playerId,
+        playerName: registrationData.playerName,
+        orderId
+    });
+
+    // Try to log error (may also fail if CMS is down)
+    await logErrorToCMS(errorData);
+
+    return {
+        success: false,
+        errorType: ErrorType.CMS_INSERT_FAILED,
+        message: 'Failed to save registration to database',
+        logged: true
+    };
+}
+
+/**
+ * Handle missing registration data (critical - payment collected, no registration found)
+ */
+export async function handleNoRegistrationData(order) {
+    const errorData = {
+        orderId: order._id,
+        registrationId: null,
+        playerName: `${order.billingInfo?.firstName || ''} ${order.billingInfo?.lastName || ''}`.trim() || 'Unknown',
+        playerId: null,
+        parentId: order.buyerInfo?.id || null,
+        sport: 'N/A',
+        division: 'UNKNOWN - SEE LINE ITEMS',
+        seasonName: 'N/A',
+        errorType: ErrorType.NO_REGISTRATION_DATA,
+        errorMessage: 'CRITICAL: Payment collected but no registration data found in session or CMS',
+        errorDetails: {
+            orderId: order._id,
+            orderNumber: order.number,
+            buyerEmail: order.billingInfo?.email,
+            buyerName: `${order.billingInfo?.firstName || ''} ${order.billingInfo?.lastName || ''}`.trim(),
+            lineItems: order.lineItems,
+            totalPaid: order.totals?.total,
+            timestamp: new Date().toISOString()
+        },
+        severity: ErrorSeverity.CRITICAL // Data loss - payment without registration
+    };
+
+    logger.critical('No registration data found', null, errorData.errorDetails);
+
+    // Log to CMS
+    await logErrorToCMS(errorData);
+
+    // Send email notifications to customer and office
+    sendRegistrationDataLostEmail({
+        orderId: order._id,
+        orderNumber: order.number,
+        buyerEmail: order.billingInfo?.email,
+        buyerFirstName: order.billingInfo?.firstName,
+        buyerLastName: order.billingInfo?.lastName,
+        lineItems: order.lineItems,
+        totalPaid: order.totals?.total
+    }).catch(emailError => {
+        logger.error('Failed to send registration data lost emails', emailError);
+    });
+
+    return {
+        success: false,
+        errorType: ErrorType.NO_REGISTRATION_DATA,
+        message: 'No registration data found - customer and office notified',
+        logged: true
+    };
+}
+
+/**
+ * Handle validation failure
+ */
+export async function handleValidationFailure(registrationData, validationError) {
+    const errorData = {
+        orderId: registrationData.orderId || null,
+        registrationId: registrationData._id || null,
+        playerName: registrationData.playerName || 'Unknown',
+        playerId: registrationData.playerId || null,
+        parentId: registrationData.parentId || null,
+        sport: registrationData.sport || 'N/A',
+        division: registrationData.division || 'Unknown',
+        seasonName: registrationData.seasonName || 'N/A',
+        errorType: ErrorType.VALIDATION_FAILED,
+        errorMessage: `Validation failed: ${validationError.message}`,
+        errorDetails: {
+            error: validationError.toString(),
+            field: validationError.field || null,
+            value: validationError.value || null,
+            registrationData,
+            timestamp: new Date().toISOString()
+        },
+        severity: ErrorSeverity.HIGH // User cannot proceed
+    };
+
+    logger.error('Validation failed', validationError, {
+        field: validationError.field,
+        playerId: registrationData.playerId
+    });
+
+    await logErrorToCMS(errorData);
+
+    return {
+        success: false,
+        errorType: ErrorType.VALIDATION_FAILED,
+        message: validationError.message,
+        logged: true
+    };
+}
+
+/**
+ * Handle unexpected errors
+ */
+export async function handleUnexpectedError(error, context = {}) {
+    const errorData = {
+        orderId: context.orderId || null,
+        registrationId: context.registrationId || null,
+        playerName: context.playerName || 'Unknown',
+        playerId: context.playerId || null,
+        parentId: context.parentId || null,
+        sport: context.sport || 'N/A',
+        division: context.division || 'Unknown',
+        seasonName: context.seasonName || 'N/A',
+        errorType: ErrorType.UNEXPECTED_ERROR,
+        errorMessage: error.message || error.toString(),
+        errorDetails: {
+            error: error.toString(),
+            stack: error.stack,
+            context,
+            timestamp: new Date().toISOString()
+        },
+        severity: context.severity || ErrorSeverity.HIGH
+    };
+
+    logger.critical('Unexpected error occurred', error, context);
+
+    await logErrorToCMS(errorData);
+
+    return {
+        success: false,
+        errorType: ErrorType.UNEXPECTED_ERROR,
+        message: 'An unexpected error occurred',
+        logged: true
+    };
+}

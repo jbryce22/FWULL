@@ -1,0 +1,334 @@
+// backend/validation.jsw
+// Input validation and sanitization utilities
+
+import { loggers } from './logger.jsw';
+
+const logger = loggers.validation;
+
+/**
+ * Validation error class
+ */
+export class ValidationError extends Error {
+    constructor(message, field = null, value = null) {
+        super(message);
+        this.name = 'ValidationError';
+        this.field = field;
+        this.value = value;
+    }
+}
+
+/**
+ * Sanitize string input to prevent XSS and injection attacks
+ */
+export function sanitizeString(input, maxLength = 200) {
+    if (!input) return '';
+
+    let sanitized = String(input).trim();
+
+    // Remove potentially dangerous characters
+    sanitized = sanitized
+        .replace(/[<>]/g, '') // Remove angle brackets (prevent HTML injection)
+        .replace(/javascript:/gi, '') // Remove javascript: protocol
+        .replace(/on\w+=/gi, ''); // Remove inline event handlers
+
+    // Enforce max length
+    if (sanitized.length > maxLength) {
+        sanitized = sanitized.substring(0, maxLength);
+    }
+
+    return sanitized;
+}
+
+/**
+ * Validate and sanitize email address
+ */
+export function validateEmail(email) {
+    if (!email) {
+        throw new ValidationError('Email is required', 'email', email);
+    }
+
+    const sanitized = sanitizeString(email, 100).toLowerCase();
+
+    // Basic email regex (RFC 5322 simplified)
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!emailRegex.test(sanitized)) {
+        throw new ValidationError('Invalid email format', 'email', sanitized);
+    }
+
+    return sanitized;
+}
+
+/**
+ * Validate and sanitize phone number
+ */
+export function validatePhone(phone) {
+    if (!phone) {
+        throw new ValidationError('Phone number is required', 'phone', phone);
+    }
+
+    // Remove all non-numeric characters
+    const digits = String(phone).replace(/\D/g, '');
+
+    // Validate length (US phone numbers: 10 digits)
+    if (digits.length !== 10) {
+        throw new ValidationError('Phone number must be 10 digits', 'phone', phone);
+    }
+
+    // Format as (XXX) XXX-XXXX
+    return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+/**
+ * Validate required field is not empty
+ */
+export function validateRequired(value, fieldName) {
+    if (value === null || value === undefined || value === '') {
+        throw new ValidationError(`${fieldName} is required`, fieldName, value);
+    }
+    return value;
+}
+
+/**
+ * Validate player ID format
+ */
+export function validatePlayerId(playerId) {
+    if (!playerId || typeof playerId !== 'string') {
+        throw new ValidationError('Invalid player ID', 'playerId', playerId);
+    }
+
+    // Wix IDs are alphanumeric with hyphens
+    const idRegex = /^[a-zA-Z0-9-]+$/;
+    if (!idRegex.test(playerId)) {
+        throw new ValidationError('Invalid player ID format', 'playerId', playerId);
+    }
+
+    return playerId;
+}
+
+/**
+ * Validate date is valid and in acceptable range
+ */
+export function validateBirthDate(birthDate) {
+    if (!birthDate) {
+        throw new ValidationError('Birth date is required', 'birthDate', birthDate);
+    }
+
+    const date = new Date(birthDate);
+
+    if (isNaN(date.getTime())) {
+        throw new ValidationError('Invalid birth date format', 'birthDate', birthDate);
+    }
+
+    // Check date is not in the future
+    if (date > new Date()) {
+        throw new ValidationError('Birth date cannot be in the future', 'birthDate', birthDate);
+    }
+
+    // Check player is not too old (max 18 years for Little League)
+    const maxDate = new Date();
+    maxDate.setFullYear(maxDate.getFullYear() - 18);
+
+    if (date < maxDate) {
+        throw new ValidationError('Player age exceeds maximum (18 years)', 'birthDate', birthDate);
+    }
+
+    // Check player is not too young (min 4 years)
+    const minDate = new Date();
+    minDate.setFullYear(minDate.getFullYear() - 4);
+
+    if (date > minDate) {
+        throw new ValidationError('Player must be at least 4 years old', 'birthDate', birthDate);
+    }
+
+    return date;
+}
+
+/**
+ * Validate division name
+ */
+export function validateDivision(division) {
+    if (!division || typeof division !== 'string') {
+        throw new ValidationError('Invalid division', 'division', division);
+    }
+
+    const sanitized = sanitizeString(division, 100);
+
+    if (!sanitized) {
+        throw new ValidationError('Division cannot be empty', 'division', division);
+    }
+
+    return sanitized;
+}
+
+/**
+ * Validate sport
+ */
+export function validateSport(sport) {
+    const validSports = ['Baseball', 'Softball'];
+
+    if (!validSports.includes(sport)) {
+        throw new ValidationError('Invalid sport (must be Baseball or Softball)', 'sport', sport);
+    }
+
+    return sport;
+}
+
+/**
+ * Validate fee amount
+ */
+export function validateFee(fee) {
+    const amount = Number(fee);
+
+    if (isNaN(amount)) {
+        throw new ValidationError('Fee must be a number', 'fee', fee);
+    }
+
+    if (amount < 0) {
+        throw new ValidationError('Fee cannot be negative', 'fee', fee);
+    }
+
+    if (amount > 10000) {
+        throw new ValidationError('Fee exceeds maximum allowed ($10,000)', 'fee', fee);
+    }
+
+    return amount;
+}
+
+/**
+ * Validate registration object contains all required fields
+ */
+export function validateRegistration(registration) {
+    const errors = [];
+
+    try {
+        validateRequired(registration.playerId, 'Player ID');
+    } catch (e) {
+        errors.push(e.message);
+    }
+
+    try {
+        validateRequired(registration.playerFirstName, 'Player First Name');
+    } catch (e) {
+        errors.push(e.message);
+    }
+
+    try {
+        validateRequired(registration.playerLastName, 'Player Last Name');
+    } catch (e) {
+        errors.push(e.message);
+    }
+
+    try {
+        validateEmail(registration.parentemail);
+    } catch (e) {
+        errors.push(e.message);
+    }
+
+    try {
+        validateSport(registration.sport);
+    } catch (e) {
+        errors.push(e.message);
+    }
+
+    try {
+        validateDivision(registration.division);
+    } catch (e) {
+        errors.push(e.message);
+    }
+
+    try {
+        validateBirthDate(registration.playerBirthDate);
+    } catch (e) {
+        errors.push(e.message);
+    }
+
+    if (errors.length > 0) {
+        logger.error('Registration validation failed', null, {
+            errors,
+            playerId: registration.playerId,
+            playerName: `${registration.playerFirstName} ${registration.playerLastName}`
+        });
+
+        throw new ValidationError(`Validation failed: ${errors.join(', ')}`);
+    }
+
+    logger.info('Registration validated successfully', {
+        playerId: registration.playerId,
+        playerName: `${registration.playerFirstName} ${registration.playerLastName}`
+    });
+
+    return true;
+}
+
+/**
+ * Sanitize entire registration object
+ */
+export function sanitizeRegistration(registration) {
+    return {
+        // Player info
+        playerId: sanitizeString(registration.playerId),
+        playerFirstName: sanitizeString(registration.playerFirstName, 50),
+        playerLastName: sanitizeString(registration.playerLastName, 50),
+        playerName: sanitizeString(registration.playerName, 100),
+        playerBirthDate: registration.playerBirthDate,
+
+        // Parent info
+        parentId: sanitizeString(registration.parentId),
+        parentFullName: sanitizeString(registration.parentFullName, 100),
+        parentemail: sanitizeString(registration.parentemail, 100).toLowerCase(),
+        parentcell: registration.parentcell, // Will be validated separately
+        additionalEmail: sanitizeString(registration.additionalEmail || '', 100).toLowerCase(),
+        address: sanitizeString(registration.address || '', 200),
+
+        // Registration details
+        sport: registration.sport, // Validated against whitelist
+        division: sanitizeString(registration.division, 100),
+        seasonName: sanitizeString(registration.seasonName, 50),
+        fee: Number(registration.fee || 0),
+
+        // School info
+        school: sanitizeString(registration.school || '', 100),
+        schoolOther: sanitizeString(registration.schoolOther || '', 100),
+        jerseySize: sanitizeString(registration.jerseySize || '', 20),
+
+        // Emergency contact
+        emergencyContactName: sanitizeString(registration.emergencyContactName || '', 100),
+        emergencyContactPhone: registration.emergencyContactPhone, // Will be validated separately
+
+        // Requests
+        requestPlayDown: sanitizeString(registration.requestPlayDown || '', 50),
+        coachRequest: sanitizeString(registration.coachRequest || '', 200),
+
+        // Volunteer info
+        teamParentVolunteer: sanitizeString(registration.teamParentVolunteer || '', 20),
+        teamParentName: sanitizeString(registration.teamParentName || '', 100),
+        teamParentEmail: sanitizeString(registration.teamParentEmail || '', 100).toLowerCase(),
+        teamParentPhone: registration.teamParentPhone, // Will be validated separately
+
+        coachVolunteer: sanitizeString(registration.coachVolunteer || '', 20),
+        coachVolunteerType: sanitizeString(registration.coachVolunteerType || '', 50),
+        volunteerCoachName: sanitizeString(registration.volunteerCoachName || '', 100),
+        volunteerCoachEmail: sanitizeString(registration.volunteerCoachEmail || '', 100).toLowerCase(),
+        volunteerCoachNumber: sanitizeString(registration.volunteerCoachNumber || '', 20),
+
+        inputVolOtherLL: sanitizeString(registration.inputVolOtherLL || '', 100),
+        volunteerCoachPriorHistory: sanitizeString(registration.volunteerCoachPriorHistory || '', 50),
+        dropdownVolCrimesMinors: sanitizeString(registration.dropdownVolCrimesMinors || '', 50),
+        dropdownVolPriorCrime: sanitizeString(registration.dropdownVolPriorCrime || '', 50),
+        dropdownVolPending: sanitizeString(registration.dropdownVolPending || '', 50),
+
+        // Checkboxes (boolean values - no sanitization needed)
+        checkboxVolPrivacyPolicy: !!registration.checkboxVolPrivacyPolicy,
+        checkboxChildProtectionProgram: !!registration.checkboxChildProtectionProgram,
+        checkboxVolunteerApp: !!registration.checkboxVolunteerApp,
+        checkboxLLChildProtect: !!registration.checkboxLLChildProtect,
+        checkboxMedicalRelease: !!registration.checkboxMedicalRelease,
+        checkboxLLPrivacyPolicy: !!registration.checkboxLLPrivacyPolicy,
+
+        // Medical
+        MedicalRelease: !!registration.MedicalRelease,
+        LLChildProtect: !!registration.LLChildProtect,
+        LLPrivacyPolicy: !!registration.LLPrivacyPolicy
+    };
+}

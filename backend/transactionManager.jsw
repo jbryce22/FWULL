@@ -1,0 +1,381 @@
+// backend/transactionManager.jsw
+// Transaction-like wrapper for CMS + Airtable operations
+// Ensures data consistency between Wix CMS and Airtable
+
+import wixData from 'wix-data';
+import { syncRegistrationToAirtable, syncDonationToAirtable } from './airtable.jsw';
+import { loggers } from './logger.jsw';
+import {
+    handleAirtableSyncFailure,
+    handleCMSInsertFailure,
+    ErrorSeverity
+} from './errorHandler.jsw';
+import { retry } from './retryUtils.jsw';
+
+const logger = loggers.system;
+
+/**
+ * Transaction result structure
+ */
+export class TransactionResult {
+    constructor() {
+        this.cmsSuccess = false;
+        this.cmsRecord = null;
+        this.airtableSuccess = false;
+        this.airtableRecord = null;
+        this.errors = [];
+    }
+
+    /**
+     * Check if transaction fully succeeded
+     */
+    get isFullSuccess() {
+        return this.cmsSuccess && this.airtableSuccess;
+    }
+
+    /**
+     * Check if at least CMS succeeded (partial success)
+     */
+    get isPartialSuccess() {
+        return this.cmsSuccess && !this.airtableSuccess;
+    }
+
+    /**
+     * Check if transaction completely failed
+     */
+    get isFailure() {
+        return !this.cmsSuccess;
+    }
+}
+
+/**
+ * Save registration to CMS with retry logic
+ * @param {Object} registrationData - Registration data to save
+ * @param {string} orderId - Order ID (if from payment)
+ * @returns {Promise<Object>} - CMS record
+ */
+async function saveRegistrationToCMS(registrationData, orderId = null) {
+    const cmsItem = {
+        // Required fields
+        parent: registrationData.parentId,
+        player: registrationData.playerId,
+        playerId: registrationData.playerId,
+        parentId: registrationData.parentId,
+
+        // Player details
+        playerFirstName: registrationData.playerFirstName,
+        playerLastName: registrationData.playerLastName,
+        playerName: registrationData.playerName || `${registrationData.playerFirstName} ${registrationData.playerLastName}`,
+        playerBirthDate: registrationData.playerBirthDate,
+
+        // Parent contact
+        parentFullName: registrationData.parentFullName,
+        parentemail: registrationData.parentemail,
+        parentcell: registrationData.parentcell,
+        address: registrationData.address || '',
+        inputAdditionalEmail: registrationData.additionalEmail || '',
+
+        // Registration details
+        sport: registrationData.sport,
+        division: registrationData.division,
+        seasonName: registrationData.seasonName,
+        fee: Number(registrationData.fee || 0),
+
+        // School
+        school: registrationData.school || '',
+        schoolOther: registrationData.schoolOther || '',
+        jerseySize: registrationData.jerseySize || '',
+
+        // Emergency contact
+        emergencyContactName: registrationData.emergencyContactName || '',
+        emergencyContactPhone: registrationData.emergencyContactPhone || '',
+
+        // Requests
+        requestPlayDown: registrationData.requestPlayDown || '',
+        coachRequest: registrationData.coachRequest || '',
+
+        // Team parent volunteer
+        teamParentVolunteer: registrationData.teamParentVolunteer || '',
+        teamParentName: registrationData.teamParentName || '',
+        teamParentEmail: registrationData.teamParentEmail || '',
+        teamParentPhone: registrationData.teamParentPhone || '',
+
+        // Coach volunteer
+        coachVolunteer: registrationData.coachVolunteer || '',
+        coachVolunteerType: registrationData.coachVolunteerType || '',
+        volunteerCoachName: registrationData.volunteerCoachName || '',
+        volunteerCoachEmail: registrationData.volunteerCoachEmail || '',
+        volunteerCoachNumber: registrationData.volunteerCoachNumber || '',
+
+        // Volunteer background
+        inputVolOtherLL: registrationData.inputVolOtherLL || '',
+        volunteerCoachPriorHistory: registrationData.volunteerCoachPriorHistory || '',
+        dropdownVolCrimesMinors: registrationData.dropdownVolCrimesMinors || '',
+        dropdownVolPriorCrime: registrationData.dropdownVolPriorCrime || '',
+        dropdownVolPending: registrationData.dropdownVolPending || '',
+
+        // Checkboxes
+        checkboxVolPrivacyPolicy: !!registrationData.checkboxVolPrivacyPolicy,
+        checkboxChildProtectionProgram: !!registrationData.checkboxChildProtectionProgram,
+        checkboxVolunteerApp: !!registrationData.checkboxVolunteerApp,
+        MedicalRelease: !!registrationData.MedicalRelease || !!registrationData.checkboxMedicalRelease,
+        LLChildProtect: !!registrationData.LLChildProtect || !!registrationData.checkboxLLChildProtect,
+        LLPrivacyPolicy: !!registrationData.LLPrivacyPolicy || !!registrationData.checkboxLLPrivacyPolicy,
+
+        // Payment info (if from checkout)
+        ...(orderId && {
+            paid: true,
+            orderId,
+            datePaid: new Date()
+        })
+    };
+
+    logger.debug('Preparing CMS insert', {
+        playerId: registrationData.playerId,
+        playerName: cmsItem.playerName,
+        orderId
+    });
+
+    // Use retry logic for CMS insert
+    return await retry(
+        () => wixData.insert('SeasonRegistration', cmsItem),
+        {
+            maxAttempts: 3,
+            baseDelay: 1000,
+            operationName: `CMS insert for ${cmsItem.playerName}`
+        }
+    );
+}
+
+/**
+ * Check for duplicate registration in CMS
+ * @param {string} playerId - Player ID
+ * @param {string} seasonName - Season name
+ * @param {string} sport - Sport
+ * @param {string} orderId - Order ID (optional)
+ * @returns {Promise<Object|null>} - Existing registration or null
+ */
+async function checkForDuplicate(playerId, seasonName, sport, orderId = null) {
+    const query = wixData.query('SeasonRegistration')
+        .eq('playerId', playerId)
+        .eq('seasonName', seasonName)
+        .eq('sport', sport);
+
+    if (orderId) {
+        query.eq('orderId', orderId);
+    }
+
+    const result = await query.limit(1).find();
+
+    return result.items.length > 0 ? result.items[0] : null;
+}
+
+/**
+ * Save registration with transaction-like behavior
+ * Attempts to save to both CMS and Airtable
+ * - If CMS fails: Full failure, no Airtable sync attempted
+ * - If CMS succeeds but Airtable fails: Partial success, error logged
+ *
+ * @param {Object} registrationData - Registration data
+ * @param {string} orderId - Order ID (optional)
+ * @returns {Promise<TransactionResult>} - Transaction result
+ */
+export async function saveRegistration(registrationData, orderId = null) {
+    const result = new TransactionResult();
+
+    try {
+        logger.info('Starting registration save transaction', {
+            playerId: registrationData.playerId,
+            playerName: registrationData.playerName,
+            orderId
+        });
+
+        // STEP 1: Check for duplicates
+        const existing = await checkForDuplicate(
+            registrationData.playerId,
+            registrationData.seasonName,
+            registrationData.sport,
+            orderId
+        );
+
+        if (existing) {
+            logger.warn('Duplicate registration prevented', {
+                playerId: registrationData.playerId,
+                existingId: existing._id,
+                orderId
+            });
+
+            result.cmsSuccess = true;
+            result.cmsRecord = existing;
+            result.airtableSuccess = true; // Assume already synced
+            result.errors.push('Duplicate registration prevented (already exists in CMS)');
+
+            return result;
+        }
+
+        // STEP 2: Save to CMS (with retry)
+        try {
+            result.cmsRecord = await saveRegistrationToCMS(registrationData, orderId);
+            result.cmsSuccess = true;
+
+            logger.info('CMS save successful', {
+                registrationId: result.cmsRecord._id,
+                playerId: registrationData.playerId,
+                playerName: registrationData.playerName
+            });
+
+        } catch (cmsError) {
+            logger.critical('CMS save failed', cmsError, {
+                playerId: registrationData.playerId,
+                playerName: registrationData.playerName,
+                orderId
+            });
+
+            // Handle CMS failure
+            const errorResult = await handleCMSInsertFailure(registrationData, cmsError, orderId);
+            result.errors.push(errorResult.message);
+
+            return result; // Stop here - don't attempt Airtable sync
+        }
+
+        // STEP 3: Sync to Airtable (non-blocking)
+        try {
+            const airtableResult = await syncRegistrationToAirtable(result.cmsRecord);
+
+            if (airtableResult.success) {
+                result.airtableSuccess = true;
+                result.airtableRecord = airtableResult.result;
+
+                logger.info('Airtable sync successful', {
+                    registrationId: result.cmsRecord._id,
+                    playerId: registrationData.playerId
+                });
+
+            } else if (airtableResult.duplicate) {
+                // Duplicate in Airtable - treat as success
+                result.airtableSuccess = true;
+                result.errors.push('Duplicate in Airtable (already synced)');
+
+                logger.info('Airtable sync skipped (duplicate)', {
+                    registrationId: result.cmsRecord._id
+                });
+
+            } else {
+                throw new Error(airtableResult.error || 'Airtable sync failed');
+            }
+
+        } catch (airtableError) {
+            logger.error('Airtable sync failed (non-critical)', airtableError, {
+                registrationId: result.cmsRecord._id,
+                playerId: registrationData.playerId
+            });
+
+            // Handle Airtable failure (non-critical - data is in CMS)
+            const errorResult = await handleAirtableSyncFailure(result.cmsRecord, airtableError);
+            result.errors.push(errorResult.message);
+
+            // Transaction still considered successful since CMS succeeded
+        }
+
+        logger.info('Registration save transaction completed', {
+            registrationId: result.cmsRecord._id,
+            cmsSuccess: result.cmsSuccess,
+            airtableSuccess: result.airtableSuccess,
+            isFullSuccess: result.isFullSuccess
+        });
+
+        return result;
+
+    } catch (unexpectedError) {
+        logger.critical('Unexpected error in registration transaction', unexpectedError, {
+            playerId: registrationData.playerId,
+            orderId
+        });
+
+        result.errors.push(`Unexpected error: ${unexpectedError.message}`);
+
+        return result;
+    }
+}
+
+/**
+ * Save donation with transaction-like behavior
+ * @param {Object} donationData - Donation data
+ * @returns {Promise<Object>} - Save result
+ */
+export async function saveDonation(donationData) {
+    try {
+        logger.info('Saving donation', {
+            donorName: donationData['Your Name'],
+            amount: donationData['Donation Amount']
+        });
+
+        const result = await syncDonationToAirtable(donationData);
+
+        if (result.success) {
+            logger.info('Donation saved successfully', {
+                donorName: donationData['Your Name'],
+                amount: donationData['Donation Amount']
+            });
+
+            return { success: true, result: result.result };
+
+        } else {
+            throw new Error(result.error || 'Donation save failed');
+        }
+
+    } catch (error) {
+        logger.error('Donation save failed', error, donationData);
+
+        return {
+            success: false,
+            error: error.message || error.toString()
+        };
+    }
+}
+
+/**
+ * Batch save multiple registrations
+ * @param {Array} registrations - Array of registration objects
+ * @param {string} orderId - Order ID
+ * @returns {Promise<Object>} - Batch result with individual results
+ */
+export async function batchSaveRegistrations(registrations, orderId = null) {
+    const results = {
+        total: registrations.length,
+        successful: 0,
+        partial: 0,
+        failed: 0,
+        details: []
+    };
+
+    logger.info(`Starting batch save of ${registrations.length} registrations`, { orderId });
+
+    for (const registration of registrations) {
+        const result = await saveRegistration(registration, orderId);
+
+        results.details.push({
+            playerId: registration.playerId,
+            playerName: registration.playerName,
+            ...result
+        });
+
+        if (result.isFullSuccess) {
+            results.successful++;
+        } else if (result.isPartialSuccess) {
+            results.partial++;
+        } else {
+            results.failed++;
+        }
+    }
+
+    logger.info('Batch save completed', {
+        total: results.total,
+        successful: results.successful,
+        partial: results.partial,
+        failed: results.failed,
+        orderId
+    });
+
+    return results;
+}

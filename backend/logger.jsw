@@ -1,0 +1,127 @@
+// backend/logger.jsw
+// Centralized logging utility for structured, categorized logging
+
+/**
+ * Log levels for categorizing log entries
+ */
+export const LogLevel = {
+    DEBUG: 'DEBUG',
+    INFO: 'INFO',
+    WARN: 'WARN',
+    ERROR: 'ERROR',
+    CRITICAL: 'CRITICAL'
+};
+
+/**
+ * Log categories for filtering and organizing logs
+ */
+export const LogCategory = {
+    AUTH: 'AUTH',
+    REGISTRATION: 'REGISTRATION',
+    CHECKOUT: 'CHECKOUT',
+    PAYMENT: 'PAYMENT',
+    AIRTABLE: 'AIRTABLE',
+    CMS: 'CMS',
+    EMAIL: 'EMAIL',
+    VALIDATION: 'VALIDATION',
+    SESSION: 'SESSION',
+    SYSTEM: 'SYSTEM'
+};
+
+/**
+ * Structured logger with categorization and metadata support
+ */
+class Logger {
+    constructor(category = LogCategory.SYSTEM) {
+        this.category = category;
+    }
+
+    /**
+     * Format log message with timestamp, level, category, and metadata
+     */
+    _formatMessage(level, message, metadata = {}) {
+        const timestamp = new Date().toISOString();
+        const metadataStr = Object.keys(metadata).length > 0
+            ? `\n${JSON.stringify(metadata, null, 2)}`
+            : '';
+
+        return `[${timestamp}] [${level}] [${this.category}] ${message}${metadataStr}`;
+    }
+
+    /**
+     * Log debug message (development only)
+     */
+    debug(message, metadata = {}) {
+        console.log(this._formatMessage(LogLevel.DEBUG, message, metadata));
+    }
+
+    /**
+     * Log informational message
+     */
+    info(message, metadata = {}) {
+        console.log(this._formatMessage(LogLevel.INFO, message, metadata));
+    }
+
+    /**
+     * Log warning message
+     */
+    warn(message, metadata = {}) {
+        console.warn(this._formatMessage(LogLevel.WARN, message, metadata));
+    }
+
+    /**
+     * Log error message
+     */
+    error(message, error = null, metadata = {}) {
+        const errorData = error ? {
+            message: error.message || error.toString(),
+            stack: error.stack,
+            ...metadata
+        } : metadata;
+
+        console.error(this._formatMessage(LogLevel.ERROR, message, errorData));
+    }
+
+    /**
+     * Log critical error (system-level failure)
+     */
+    critical(message, error = null, metadata = {}) {
+        const errorData = error ? {
+            message: error.message || error.toString(),
+            stack: error.stack,
+            ...metadata
+        } : metadata;
+
+        console.error(this._formatMessage(LogLevel.CRITICAL, message, errorData));
+    }
+
+    /**
+     * Create child logger with same category
+     */
+    child(subcategory) {
+        return new Logger(`${this.category}:${subcategory}`);
+    }
+}
+
+/**
+ * Factory function to create loggers
+ */
+export function createLogger(category = LogCategory.SYSTEM) {
+    return new Logger(category);
+}
+
+/**
+ * Pre-configured logger instances for common use cases
+ */
+export const loggers = {
+    auth: createLogger(LogCategory.AUTH),
+    registration: createLogger(LogCategory.REGISTRATION),
+    checkout: createLogger(LogCategory.CHECKOUT),
+    payment: createLogger(LogCategory.PAYMENT),
+    airtable: createLogger(LogCategory.AIRTABLE),
+    cms: createLogger(LogCategory.CMS),
+    email: createLogger(LogCategory.EMAIL),
+    validation: createLogger(LogCategory.VALIDATION),
+    session: createLogger(LogCategory.SESSION),
+    system: createLogger(LogCategory.SYSTEM)
+};
