@@ -1,29 +1,123 @@
-import { submitFinancialAid } from 'backend/financialAid';
+import { submitFinancialAid } from 'backend/financialaid';
 
-let handlerAttached = false; // Use a simple flag variable instead of attaching to $w.$page
+let formHandlerAttached = false;
 
 $w.onReady(() => {
-    console.log("Financial Aid page ready.");
+    console.log("Financial Aid lightbox ready.");
 
-    if (handlerAttached) {
-        return; // Don't attach again
+    // Prevent duplicate handler attachment
+    if (formHandlerAttached) {
+        console.log("Form handler already attached, skipping.");
+        return;
     }
-    handlerAttached = true;
+    formHandlerAttached = true;
 
-    $w('#financialaidform').onSubmit(async (event) => {
-        console.log("Financial Aid Form Submitted (only once!)");
+    // Check if form element exists
+    const form = $w('#financialaidform');
+    if (!form) {
+        console.error("ERROR: #financialaidform element not found on page!");
+        return;
+    }
+
+    console.log("Attaching onSubmit handler to financial aid form...");
+
+    form.onSubmit(async (event) => {
+        console.log("[Financial Aid] Form submitted!");
+        console.log("[Financial Aid] Raw event:", event);
 
         try {
-            const result = await submitFinancialAid(event);
-            console.log("Airtable result:", result);
+            // Extract form data from event
+            const formData = event.target || {};
+            console.log("[Financial Aid] Form data extracted:", formData);
 
-            if (result.success) {
-                // success UI
-            } else {
-                // error UI
+            // Validate required fields
+            if (!formData.your_email) {
+                console.error("[Financial Aid] ERROR: Missing email field");
+                $w('#errorText').text = "Please provide your email address.";
+                $w('#errorText').show();
+                return;
             }
+
+            // Show loading state
+            $w('#submitButton').disable();
+            $w('#submitButton').label = "Submitting...";
+
+            // Submit to Airtable with retry logic
+            let result = null;
+            let lastError = null;
+
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    console.log(`[Financial Aid] Airtable submit attempt ${attempt}/3...`);
+                    result = await submitFinancialAid(formData);
+
+                    if (result.success) {
+                        console.log(`[Financial Aid] ✓ Airtable submission successful on attempt ${attempt}:`, result.id);
+                        break;
+                    } else {
+                        console.error(`[Financial Aid] ✗ Airtable returned error:`, result.error);
+                        lastError = result.error;
+                    }
+                } catch (err) {
+                    console.error(`[Financial Aid] ✗ Attempt ${attempt}/3 failed:`, err);
+                    lastError = err;
+
+                    // Check if retryable error
+                    const isRetryable = err.message?.includes('timeout') ||
+                                       err.message?.includes('503') ||
+                                       err.message?.includes('504') ||
+                                       err.message?.includes('Network');
+
+                    if (attempt === 3 || !isRetryable) {
+                        break;
+                    }
+
+                    // Wait before retry
+                    await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+                }
+            }
+
+            // Handle result
+            if (result && result.success) {
+                console.log("[Financial Aid] ✓ SUCCESS - Application submitted to Airtable");
+
+                // Show success message
+                $w('#successText').text = "Thank you! Your financial aid application has been submitted successfully.";
+                $w('#successText').show();
+                $w('#errorText').hide();
+
+                // Reset form after short delay
+                setTimeout(() => {
+                    form.reset();
+                    $w('#submitButton').enable();
+                    $w('#submitButton').label = "Submit";
+                }, 2000);
+
+            } else {
+                console.error("[Financial Aid] ✗ FAILED - Application not submitted");
+                console.error("[Financial Aid] Last error:", lastError);
+
+                // Show error message
+                $w('#errorText').text = "Sorry, there was an error submitting your application. Please try again or contact support.";
+                $w('#errorText').show();
+                $w('#successText').hide();
+
+                $w('#submitButton').enable();
+                $w('#submitButton').label = "Submit";
+            }
+
         } catch (err) {
-            console.error("Submit error:", err);
+            console.error("[Financial Aid] Unexpected error during form submission:", err);
+            console.error("[Financial Aid] Error stack:", err.stack);
+
+            // Show error to user
+            $w('#errorText').text = "An unexpected error occurred. Please try again.";
+            $w('#errorText').show();
+
+            $w('#submitButton').enable();
+            $w('#submitButton').label = "Submit";
         }
     });
+
+    console.log("[Financial Aid] Form handler attached successfully.");
 });
