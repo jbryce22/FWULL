@@ -1,6 +1,6 @@
 import { ok, badRequest } from 'wix-http-functions';
 import { products } from 'wix-stores.v2';
-import { PRODUCT_MAP } from './constants.js';
+import { PRODUCT_MAP } from 'public/constants.js';
 
 // This map matches the exact division string coming from your registration form
 const DIVISION_TO_PRODUCT = PRODUCT_MAP;
