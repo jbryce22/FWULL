@@ -120,8 +120,8 @@ export const PRODUCT_MAP = {
     "Baseball 14U Junior - 2026.1": "a520c83e-cb40-4987-b448-09563f963010",
     "Baseball 15U Senior - 2026.1": "992595c0-269c-4ea1-9eb2-80c61308447b",
     "Softball Majors - 2026.1": "ac9051d6-5da6-4887-a650-0f5f196a92b9",
-    "Softball Upper Minors - 2026.1": "9275d7d7-2810-4ef5-ba64-35a0cd109797",
-    "Softball Lower Minors - 2026.1": "9275d7d7-2810-4ef5-ba64-35a0cd109797",
+    "Softball Upper Minors - 2026.1": "2d86cf60-8e4e-4c97-bf20-cb79e38042a5",
+    "Softball Lower Minors - 2026.1": "4e3a98a8-02dd-482e-84d1-921896ac1d9e",
     "Softball Coach Pitch - 2026.1": "d14e677f-78d8-4cd3-9d3f-13a880a6bdac",
     "Softball Daisy League - 2026.1": "5abbb0c6-dc69-4ada-9600-5c47d063c33e",
     "Majors": "5abbb0c6-dc69-4ada-9600-5c47d063c33e"
