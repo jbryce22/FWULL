@@ -617,7 +617,8 @@ const calculateDivision = async () => {
         }
     } else if (sportOk === SPORTS.SOFTBALL) {
     if (age >= 11 && age <= 12) division = DIVISIONS.SOFTBALL_MAJORS + seasonTag;
-        else if (age >= 9 && age <= 10) division = DIVISIONS.SOFTBALL_MINORS + seasonTag;
+        else if (age >= 9 && age <= 9) division = DIVISIONS.SOFTBALL_LOWER_MINORS + seasonTag;
+        else if (age >= 10 && age <= 10) division = DIVISIONS.SOFTBALL_UPPER_MINORS + seasonTag;
         else if (age >= 7 && age <= 8) division = DIVISIONS.SOFTBALL_COACH_PITCH + seasonTag;
         else if (age >= 6 && age <= 7) division = DIVISIONS.SOFTBALL_DAISY + seasonTag;
     } else {
