@@ -60,7 +60,7 @@ export const DIVISIONS = {
     SOFTBALL_COACH_PITCH: "Softball Coach Pitch",
     SOFTBALL_LOWER_MINORS: "Softball Lower Minors",
     SOFTBALL_UPPER_MINORS: "Softball Upper Minors",
-        SOFTBALL_MAJORS: "Softball Majors"
+    SOFTBALL_MAJORS: "Softball Majors"
 };
 
 // ===== SPORTS =====
