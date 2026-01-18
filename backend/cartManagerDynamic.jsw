@@ -1,0 +1,153 @@
+// backend/cartManagerDynamic.jsw
+// Dynamic cart management with Airtable pricing
+
+import { cart } from 'wix-ecom-backend';
+import { getDivisionNote } from './airtable.jsw';
+
+/**
+ * Add registration to cart with dynamic Airtable pricing
+ * @param {string} division - Division name (e.g., "Baseball Majors - 2026.1")
+ * @param {string} productId - Wix product ID for registration
+ * @param {Object} registrationData - Full registration data to embed
+ * @returns {Promise<Object>} - Cart result
+ */
+export async function addRegistrationToCart(division, productId, registrationData) {
+    try {
+        console.log('[CartManager] Adding registration with dynamic pricing');
+        console.log('[CartManager] Division:', division);
+
+        // 1. Get dynamic price from Airtable
+        const divInfo = await getDivisionNote(division);
+
+        if (!divInfo.success) {
+            throw new Error('Failed to fetch division info from Airtable');
+        }
+
+        const dynamicPrice = divInfo.fee || 0;
+
+        console.log('[CartManager] Airtable price:', dynamicPrice);
+
+        // 2. Build line item with custom price and embedded data
+        const lineItem = {
+            catalogReference: {
+                catalogItemId: productId,
+                appId: '1380b703-ce81-ff05-f115-39571d94dfcd' // Wix Stores app ID
+            },
+            quantity: 1,
+
+            // ✨ DYNAMIC PRICE FROM AIRTABLE
+            priceOverride: {
+                price: dynamicPrice.toString(),
+                currency: 'USD'
+            },
+
+            // ✨ EMBED REGISTRATION DATA (for recovery on Thank You page)
+            customTextFields: [
+                { title: 'Player ID', value: registrationData.playerId || '' },
+                { title: 'Player Name', value: registrationData.playerName || '' },
+                { title: 'Player Birth Date', value: registrationData.playerBirthDate || '' },
+                { title: 'Parent ID', value: registrationData.parentId || '' },
+                { title: 'Parent Email', value: registrationData.parentemail || '' },
+                { title: 'Parent Cell', value: registrationData.parentcell || '' },
+                { title: 'Division', value: registrationData.division || '' },
+                { title: 'Sport', value: registrationData.sport || '' },
+                { title: 'Season', value: registrationData.seasonName || '' },
+                { title: 'Jersey Size', value: registrationData.jerseySize || '' },
+                { title: 'School', value: registrationData.school || '' },
+                { title: 'Emergency Contact', value: registrationData.emergencyContactName || '' },
+                { title: 'Emergency Phone', value: registrationData.emergencyContactPhone || '' }
+                // Add more fields as needed (up to 20 custom fields allowed)
+            ]
+        };
+
+        // 3. Add to cart
+        const result = await cart.addToCurrentCart({
+            lineItems: [lineItem]
+        });
+
+        console.log('[CartManager] ✓ Added to cart with dynamic price:', dynamicPrice);
+
+        return {
+            success: true,
+            cartId: result.cart._id,
+            price: dynamicPrice
+        };
+
+    } catch (error) {
+        console.error('[CartManager] ✗ Failed to add to cart:', error);
+        return {
+            success: false,
+            error: error.message || error.toString()
+        };
+    }
+}
+
+/**
+ * Get current cart with all custom data
+ * @returns {Promise<Object>} - Cart with line items and custom fields
+ */
+export async function getCurrentCartWithData() {
+    try {
+        const currentCart = await cart.getCurrentCart();
+
+        // Extract registration data from custom fields
+        const registrations = currentCart.lineItems.map(item => {
+            const regData = {};
+
+            if (item.customTextFields) {
+                item.customTextFields.forEach(field => {
+                    const key = field.title.replace(/\s+/g, ''); // Remove spaces
+                    regData[key] = field.value;
+                });
+            }
+
+            return {
+                ...regData,
+                lineItemId: item._id,
+                productName: item.productName,
+                price: item.price,
+                quantity: item.quantity
+            };
+        });
+
+        return {
+            success: true,
+            cart: currentCart,
+            registrations
+        };
+
+    } catch (error) {
+        console.error('[CartManager] ✗ Failed to get cart:', error);
+        return {
+            success: false,
+            error: error.message || error.toString()
+        };
+    }
+}
+
+/**
+ * Clear current cart
+ * @returns {Promise<Object>} - Clear result
+ */
+export async function clearCart() {
+    try {
+        const currentCart = await cart.getCurrentCart();
+
+        if (currentCart && currentCart.lineItems.length > 0) {
+            await cart.removeLineItems(
+                currentCart.lineItems.map(item => item._id)
+            );
+
+            console.log('[CartManager] ✓ Cart cleared');
+        }
+
+        return { success: true };
+
+    } catch (error) {
+        console.error('[CartManager] ✗ Failed to clear cart:', error);
+        return {
+            success: false,
+            error: error.message || error.toString()
+        };
+    }
+}
