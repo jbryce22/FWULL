@@ -1,0 +1,355 @@
+// FILE: backend/formHelper.jsw
+// Declarative form field mapping and data collection utilities
+// Makes working with Wix forms MUCH easier
+
+/**
+ * FIELD TYPES - Determines how to extract value from element
+ */
+export const FieldType = {
+    TEXT: 'text',           // Text input, textarea
+    DROPDOWN: 'dropdown',   // Dropdown select
+    CHECKBOX: 'checkbox',   // Single checkbox (returns boolean)
+    RADIO: 'radio',         // Radio button group
+    DATE: 'date',           // Date picker
+    NUMBER: 'number',       // Number input
+    PHONE: 'phone',         // Phone input
+    EMAIL: 'email'          // Email input
+};
+
+/**
+ * VALIDATION RULES - Optional validators for each field
+ */
+export const ValidationRule = {
+    REQUIRED: 'required',
+    EMAIL: 'email',
+    PHONE: 'phone',
+    MIN_LENGTH: 'minLength',
+    MAX_LENGTH: 'maxLength',
+    PATTERN: 'pattern'
+};
+
+/**
+ * FIELD CONFIGURATION SCHEMA
+ *
+ * Each field config has:
+ * - id: Wix element ID (e.g., '#inputSchool')
+ * - key: Property name in result object (e.g., 'school')
+ * - type: FieldType enum value
+ * - required: Boolean (default false)
+ * - defaultValue: Fallback value if field is empty
+ * - transform: Optional function to transform value after extraction
+ * - validate: Optional validation rules array
+ * - dependsOn: Optional field dependencies (show/hide logic)
+ *
+ * Example:
+ * {
+ *   id: '#inputSchool',
+ *   key: 'school',
+ *   type: FieldType.DROPDOWN,
+ *   required: true,
+ *   defaultValue: '',
+ *   transform: (value, allData) => value === 'Other' ? allData.schoolOther : value
+ * }
+ */
+
+/**
+ * Extract value from a Wix element based on field type
+ */
+function extractValue(element, fieldType) {
+    if (!element) return null;
+
+    try {
+        switch (fieldType) {
+            case FieldType.CHECKBOX:
+                return element.checked === true;
+
+            case FieldType.RADIO:
+                return element.value || null;
+
+            case FieldType.DATE:
+                // Date picker returns Date object
+                return element.value instanceof Date ? element.value : null;
+
+            case FieldType.NUMBER:
+                const numVal = element.value;
+                return numVal !== null && numVal !== '' ? Number(numVal) : null;
+
+            case FieldType.TEXT:
+            case FieldType.DROPDOWN:
+            case FieldType.PHONE:
+            case FieldType.EMAIL:
+            default:
+                return element.value || '';
+        }
+    } catch (error) {
+        console.error(`Failed to extract value from ${element.id || 'unknown'}:`, error);
+        return null;
+    }
+}
+
+/**
+ * Safe element getter - won't crash if element doesn't exist
+ */
+function getElement($w, id) {
+    try {
+        const el = $w(id);
+        return (el && typeof el === 'object') ? el : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Collect form data based on field configuration
+ *
+ * @param {Object} $w - Wix page $w selector
+ * @param {Array} fieldConfigs - Array of field configuration objects
+ * @returns {Object} Object with field keys as properties
+ *
+ * @example
+ * const data = collectFormData($w, REGISTRATION_FIELDS);
+ * // Returns: { school: 'PS 123', jerseySize: 'Medium', ... }
+ */
+export function collectFormData($w, fieldConfigs) {
+    const result = {};
+    const errors = [];
+
+    for (const config of fieldConfigs) {
+        const { id, key, type, required, defaultValue, transform } = config;
+
+        // Get element
+        const element = getElement($w, id);
+
+        // Handle missing elements
+        if (!element) {
+            if (required) {
+                errors.push(`Required field element not found: ${id}`);
+            }
+            result[key] = defaultValue !== undefined ? defaultValue : null;
+            continue;
+        }
+
+        // Extract value based on field type
+        let value = extractValue(element, type);
+
+        // Apply default if empty
+        if ((value === null || value === '' || value === undefined) && defaultValue !== undefined) {
+            value = defaultValue;
+        }
+
+        // Validate required fields
+        if (required && (value === null || value === '' || value === undefined || value === false)) {
+            errors.push(`Required field is empty: ${key} (${id})`);
+        }
+
+        // Store raw value first
+        result[key] = value;
+    }
+
+    // Apply transforms AFTER all raw values collected (transforms can reference other fields)
+    for (const config of fieldConfigs) {
+        const { key, transform } = config;
+        if (transform && typeof transform === 'function') {
+            try {
+                result[key] = transform(result[key], result);
+            } catch (error) {
+                console.error(`Transform failed for ${key}:`, error);
+            }
+        }
+    }
+
+    // Return data and errors
+    return {
+        data: result,
+        errors: errors,
+        isValid: errors.length === 0
+    };
+}
+
+/**
+ * Validate form based on field configuration
+ *
+ * @param {Object} $w - Wix page $w selector
+ * @param {Array} fieldConfigs - Array of field configuration objects
+ * @returns {Object} { isValid: boolean, errors: string[] }
+ */
+export function validateForm($w, fieldConfigs) {
+    const errors = [];
+
+    for (const config of fieldConfigs) {
+        const { id, key, type, required, validate } = config;
+
+        const element = getElement($w, id);
+        if (!element) {
+            if (required) {
+                errors.push(`Required field not found: ${key}`);
+            }
+            continue;
+        }
+
+        const value = extractValue(element, type);
+
+        // Check required
+        if (required && !value && value !== false) {
+            errors.push(`${key} is required`);
+            continue;
+        }
+
+        // Run additional validations
+        if (validate && Array.isArray(validate)) {
+            for (const rule of validate) {
+                const error = validateField(value, rule, key);
+                if (error) {
+                    errors.push(error);
+                }
+            }
+        }
+    }
+
+    return {
+        isValid: errors.length === 0,
+        errors: errors
+    };
+}
+
+/**
+ * Run a single validation rule
+ */
+function validateField(value, rule, fieldKey) {
+    if (!value) return null; // Skip validation for empty non-required fields
+
+    if (typeof rule === 'string') {
+        // Simple rule name
+        switch (rule) {
+            case ValidationRule.EMAIL:
+                return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? null : `${fieldKey} must be a valid email`;
+
+            case ValidationRule.PHONE:
+                return /^\d{10,}$/.test(value.replace(/\D/g, '')) ? null : `${fieldKey} must be a valid phone number`;
+
+            default:
+                return null;
+        }
+    } else if (typeof rule === 'object') {
+        // Rule with parameters
+        if (rule.type === ValidationRule.MIN_LENGTH) {
+            return value.length >= rule.value ? null : `${fieldKey} must be at least ${rule.value} characters`;
+        }
+        if (rule.type === ValidationRule.MAX_LENGTH) {
+            return value.length <= rule.value ? null : `${fieldKey} must be no more than ${rule.value} characters`;
+        }
+        if (rule.type === ValidationRule.PATTERN) {
+            return rule.value.test(value) ? null : `${fieldKey} format is invalid`;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Set form values from data object
+ * Useful for pre-filling forms or editing existing data
+ *
+ * @param {Object} $w - Wix page $w selector
+ * @param {Array} fieldConfigs - Array of field configuration objects
+ * @param {Object} data - Data object with values to set
+ */
+export function setFormData($w, fieldConfigs, data) {
+    for (const config of fieldConfigs) {
+        const { id, key, type } = config;
+        const element = getElement($w, id);
+
+        if (!element || !(key in data)) continue;
+
+        const value = data[key];
+
+        try {
+            switch (type) {
+                case FieldType.CHECKBOX:
+                    element.checked = Boolean(value);
+                    break;
+
+                case FieldType.DATE:
+                    if (value instanceof Date) {
+                        element.value = value;
+                    }
+                    break;
+
+                case FieldType.TEXT:
+                case FieldType.DROPDOWN:
+                case FieldType.RADIO:
+                case FieldType.NUMBER:
+                case FieldType.PHONE:
+                case FieldType.EMAIL:
+                default:
+                    element.value = value;
+                    break;
+            }
+        } catch (error) {
+            console.error(`Failed to set value for ${id}:`, error);
+        }
+    }
+}
+
+/**
+ * Clear all form fields
+ *
+ * @param {Object} $w - Wix page $w selector
+ * @param {Array} fieldConfigs - Array of field configuration objects
+ */
+export function clearForm($w, fieldConfigs) {
+    for (const config of fieldConfigs) {
+        const { id, type, defaultValue } = config;
+        const element = getElement($w, id);
+
+        if (!element) continue;
+
+        try {
+            switch (type) {
+                case FieldType.CHECKBOX:
+                    element.checked = false;
+                    break;
+
+                case FieldType.DATE:
+                    element.value = null;
+                    break;
+
+                case FieldType.TEXT:
+                case FieldType.DROPDOWN:
+                case FieldType.RADIO:
+                case FieldType.NUMBER:
+                case FieldType.PHONE:
+                case FieldType.EMAIL:
+                default:
+                    element.value = defaultValue !== undefined ? defaultValue : '';
+                    break;
+            }
+        } catch (error) {
+            console.error(`Failed to clear ${id}:`, error);
+        }
+    }
+}
+
+/**
+ * Show validation errors on form
+ * Requires error text elements with IDs matching pattern: {fieldId}Error
+ *
+ * @param {Object} $w - Wix page $w selector
+ * @param {Array} errors - Array of error messages
+ */
+export function showFormErrors($w, errors) {
+    // Hide all error messages first
+    const errorElements = $w('Text').filter(el => el.id && el.id.includes('Error'));
+    errorElements.forEach(el => {
+        try {
+            if (el.collapse) el.collapse();
+            else if (el.hide) el.hide();
+        } catch {}
+    });
+
+    // Show relevant errors
+    errors.forEach(error => {
+        console.error('Form validation error:', error);
+        // You could parse field names from errors and show specific error messages
+    });
+}
